@@ -1,12 +1,6 @@
-import * as pdfjsLib from 'pdfjs-dist';
 import { ParsedRosterPayload } from '../types';
 import { parseRosterWithAI } from './aiParserClient';
 import { parseDateRange, extractTeacherNames } from './rosterParser';
-
-// Set up worker source from public folder
-if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-}
 
 interface TextItemWithCoords {
   str: string;
@@ -18,6 +12,11 @@ export async function parsePdfRoster(
   buffer: ArrayBuffer,
   fileName: string
 ): Promise<ParsedRosterPayload> {
+  const pdfjsLib = await import('pdfjs-dist');
+  if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+  }
+
   const uint8 = new Uint8Array(buffer);
   const loadingTask = pdfjsLib.getDocument({ data: uint8 });
   const pdf = await loadingTask.promise;

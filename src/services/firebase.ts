@@ -11,6 +11,7 @@ import {
   deleteDoc,
   writeBatch
 } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { AppSettings, DutyAssignment, Roster, SendHistory } from '../types';
 
@@ -33,26 +34,115 @@ export const DEFAULT_SETTINGS: AppSettings = {
   messageTemplate: DEFAULT_TEMPLATE,
   whatsAppBehavior: 'app',
   targetGroupHint: 'Teachers Staff Group',
+  theme: 'dark',
   updatedAt: new Date().toISOString()
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
+export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)');
+export const auth = getAuth(app);
 
 // Local storage fallback keys for high resilience offline
-const LOCAL_STORAGE_KEYS = {
+export const LOCAL_STORAGE_KEYS = {
   SETTINGS: 'xtreme_duty_settings',
   ROSTERS: 'xtreme_duty_rosters',
   ASSIGNMENTS: 'xtreme_duty_assignments',
   HISTORY: 'xtreme_duty_history'
 };
 
+// Synchronous fast-path cache accessors for instant (0ms) app startup
+export function getCachedSettings(): AppSettings {
+  if (typeof window === 'undefined') return DEFAULT_SETTINGS;
+  try {
+    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SETTINGS);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+  return DEFAULT_SETTINGS;
+}
+
+export function getCachedRosters(): Roster[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ROSTERS);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function getCachedDutyAssignments(): DutyAssignment[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function getCachedSendHistory(): SendHistory[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.HISTORY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+// Bounded timeout helper to prevent slow network handshakes from stalling UI updates
+function withTimeout<T>(promise: Promise<T>, ms: number = 3000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Network timeout after ${ms}ms`)), ms)
+    )
+  ]);
+}
+
+// Helper to get auth header if user is logged in
+async function getAuthHeader(): Promise<Record<string, string>> {
+  const currentUser = auth.currentUser;
+  if (currentUser) {
+    try {
+      const token = await currentUser.getIdToken();
+      return { 'Authorization': `Bearer ${token}` };
+    } catch {}
+  }
+  return {};
+}
+
 // --- SETTINGS ---
 
 export async function getSettings(): Promise<AppSettings> {
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await withTimeout(fetch('/api/settings', { headers }), 2500);
+      if (res.ok) {
+        const data = await res.json();
+        if (data) {
+          localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(data));
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('PostgreSQL getSettings skipped or timed out, checking cache...', err);
+    }
+  }
+
+  // Fallback to Firestore & LocalStorage
   try {
     const docRef = doc(db, 'settings', 'main');
-    const snap = await getDoc(docRef);
+    const snap = await withTimeout(getDoc(docRef), 2500);
     if (snap.exists()) {
       const data = snap.data() as AppSettings;
       localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(data));
@@ -62,20 +152,34 @@ export async function getSettings(): Promise<AppSettings> {
     await saveSettings(DEFAULT_SETTINGS);
     return DEFAULT_SETTINGS;
   } catch (err) {
-    console.warn('Firestore getSettings fallback to local storage', err);
-    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SETTINGS);
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch {}
-    }
-    return DEFAULT_SETTINGS;
+    return getCachedSettings();
   }
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
   const updated: AppSettings = { ...settings, updatedAt: new Date().toISOString() };
   localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
+
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(updated)
+      });
+      if (res.ok) return;
+    } catch (err) {
+      console.warn('PostgreSQL saveSettings failed, falling back...', err);
+    }
+  }
+
+  // Fallback to Firestore
   try {
     const docRef = doc(db, 'settings', 'main');
     await setDoc(docRef, updated, { merge: true });
@@ -87,37 +191,40 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
 // --- ROSTERS ---
 
 export async function getRosters(): Promise<Roster[]> {
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await withTimeout(fetch('/api/rosters', { headers }), 2500);
+      if (res.ok) {
+        const rosters = await res.json();
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ROSTERS, JSON.stringify(rosters));
+        return rosters;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL getRosters skipped or timed out, checking cache...', err);
+    }
+  }
+
+  // Fallback to Firestore & LocalStorage
   try {
     const rostersCol = collection(db, 'rosters');
     const q = query(rostersCol, orderBy('uploadedAt', 'desc'));
-    const snap = await getDocs(q);
+    const snap = await withTimeout(getDocs(q), 2500);
     const rosters: Roster[] = [];
     snap.forEach((d) => rosters.push(d.data() as Roster));
     if (rosters.length > 0) {
       localStorage.setItem(LOCAL_STORAGE_KEYS.ROSTERS, JSON.stringify(rosters));
       return rosters;
     }
-    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ROSTERS);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return [];
+    return getCachedRosters();
   } catch (err) {
-    console.warn('Firestore getRosters fallback to local storage', err);
-    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ROSTERS);
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch {}
-    }
-    return [];
+    return getCachedRosters();
   }
 }
 
-function cleanDoc<T>(obj: T): any {
+function cleanDoc(obj: any): any {
   if (obj === null || obj === undefined) return null;
   if (Array.isArray(obj)) return obj.map(cleanDoc);
   if (typeof obj === 'object') {
@@ -136,7 +243,7 @@ export async function saveRosterWithAssignments(
   roster: Roster,
   assignments: DutyAssignment[]
 ): Promise<void> {
-  console.log(`[RosterSave:Firestore] Starting persistence for roster "${roster.name}" (${roster.id}) with ${assignments.length} assignments.`);
+  console.log(`[RosterSave:Client] Starting persistence for roster "${roster.name}" (${roster.id}) with ${assignments.length} assignments.`);
 
   // Update local cache first
   const cachedRosters = await getRosters();
@@ -145,8 +252,31 @@ export async function saveRosterWithAssignments(
 
   const cachedAssignments = (await getDutyAssignments()).filter(a => a.rosterId !== roster.id);
   localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify([...assignments, ...cachedAssignments]));
-  console.log('[RosterSave:Firestore] Local cache synchronized.');
+  console.log('[RosterSave:Client] Local cache synchronized.');
 
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await fetch('/api/rosters', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify({ roster, assignments })
+      });
+      if (res.ok) {
+        console.log('[RosterSave:PostgreSQL] Saved successfully to Cloud SQL PostgreSQL.');
+        return;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL saveRoster failed, falling back to Firestore...', err);
+    }
+  }
+
+  // Fallback to Firestore
   try {
     const batch = writeBatch(db);
 
@@ -197,6 +327,25 @@ export async function deleteRoster(rosterId: string): Promise<void> {
   const cachedAssignments = (await getDutyAssignments()).filter(a => a.rosterId !== rosterId);
   localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(cachedAssignments));
 
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await fetch(`/api/rosters/${rosterId}`, {
+        method: 'DELETE',
+        headers
+      });
+      if (res.ok) {
+        console.log('[RosterDelete:PostgreSQL] Deleted successfully from Cloud SQL.');
+        return;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL deleteRoster failed, falling back to Firestore...', err);
+    }
+  }
+
+  // Fallback to Firestore
   try {
     const batch = writeBatch(db);
 
@@ -234,6 +383,29 @@ export async function setActiveRoster(rosterId: string): Promise<void> {
 
   localStorage.setItem(LOCAL_STORAGE_KEYS.ROSTERS, JSON.stringify(updatedRosters));
 
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await fetch('/api/rosters/active', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify({ rosterId })
+      });
+      if (res.ok) {
+        console.log('[RosterActivate:PostgreSQL] Activated roster successfully in Cloud SQL.');
+        return;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL setActiveRoster failed, falling back to Firestore...', err);
+    }
+  }
+
+  // Fallback to Firestore
   try {
     const batch = writeBatch(db);
     for (const r of updatedRosters) {
@@ -250,33 +422,36 @@ export async function setActiveRoster(rosterId: string): Promise<void> {
 // --- DUTY ASSIGNMENTS ---
 
 export async function getDutyAssignments(): Promise<DutyAssignment[]> {
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await withTimeout(fetch('/api/assignments', { headers }), 2500);
+      if (res.ok) {
+        const assignments = await res.json();
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(assignments));
+        return assignments;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL getDutyAssignments skipped or timed out, checking cache...', err);
+    }
+  }
+
+  // Fallback to Firestore & LocalStorage
   try {
     const assignCol = collection(db, 'dutyAssignments');
     const q = query(assignCol, orderBy('startDate', 'asc'));
-    const snap = await getDocs(q);
+    const snap = await withTimeout(getDocs(q), 2500);
     const assignments: DutyAssignment[] = [];
     snap.forEach((d) => assignments.push(d.data() as DutyAssignment));
     if (assignments.length > 0) {
       localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(assignments));
       return assignments;
     }
-    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return [];
+    return getCachedDutyAssignments();
   } catch (err) {
-    console.warn('Firestore getDutyAssignments fallback', err);
-    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS);
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch {}
-    }
-    return [];
+    return getCachedDutyAssignments();
   }
 }
 
@@ -285,6 +460,29 @@ export async function updateDutyAssignment(assignment: DutyAssignment): Promise<
   const updated = cached.map(a => a.id === assignment.id ? assignment : a);
   localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(updated));
 
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await fetch('/api/assignments/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify({ assignment })
+      });
+      if (res.ok) {
+        console.log('[AssignmentUpdate:PostgreSQL] Updated assignment successfully in Cloud SQL.');
+        return;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL updateDutyAssignment failed, falling back...', err);
+    }
+  }
+
+  // Fallback to Firestore
   try {
     const docRef = doc(db, 'dutyAssignments', assignment.id);
     await setDoc(docRef, assignment, { merge: true });
@@ -296,25 +494,36 @@ export async function updateDutyAssignment(assignment: DutyAssignment): Promise<
 // --- SEND HISTORY ---
 
 export async function getSendHistory(): Promise<SendHistory[]> {
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await withTimeout(fetch('/api/send-history', { headers }), 2500);
+      if (res.ok) {
+        const history = await res.json();
+        localStorage.setItem(LOCAL_STORAGE_KEYS.HISTORY, JSON.stringify(history));
+        return history;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL getSendHistory skipped or timed out, checking cache...', err);
+    }
+  }
+
+  // Fallback to Firestore & LocalStorage
   try {
     const col = collection(db, 'sendHistory');
     const q = query(col, orderBy('timestamp', 'desc'));
-    const snap = await getDocs(q);
+    const snap = await withTimeout(getDocs(q), 2500);
     const history: SendHistory[] = [];
     snap.forEach(d => history.push(d.data() as SendHistory));
     if (history.length > 0) {
       localStorage.setItem(LOCAL_STORAGE_KEYS.HISTORY, JSON.stringify(history));
+      return history;
     }
-    return history;
+    return getCachedSendHistory();
   } catch (err) {
-    console.warn('Firestore getSendHistory fallback', err);
-    const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.HISTORY);
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch {}
-    }
-    return [];
+    return getCachedSendHistory();
   }
 }
 
@@ -322,6 +531,29 @@ export async function recordSendHistory(item: SendHistory): Promise<void> {
   const cached = await getSendHistory();
   localStorage.setItem(LOCAL_STORAGE_KEYS.HISTORY, JSON.stringify([item, ...cached]));
 
+  const headers = await getAuthHeader();
+  const isUserLoggedIn = !!headers.Authorization;
+
+  if (isUserLoggedIn) {
+    try {
+      const res = await fetch('/api/send-history', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(item)
+      });
+      if (res.ok) {
+        console.log('[SendHistory:PostgreSQL] Recorded history successfully in Cloud SQL.');
+        return;
+      }
+    } catch (err) {
+      console.warn('PostgreSQL recordSendHistory failed, falling back...', err);
+    }
+  }
+
+  // Fallback to Firestore
   try {
     const docRef = doc(db, 'sendHistory', item.id);
     await setDoc(docRef, item);

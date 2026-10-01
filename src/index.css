@@ -1,22 +1,48 @@
 @import "tailwindcss";
 
 @layer base {
-  :root {
-    --sat: env(safe-area-inset-top, 0px);
-    --sab: env(safe-area-inset-bottom, 0px);
-    --sal: env(safe-area-inset-left, 0px);
-    --sar: env(safe-area-inset-right, 0px);
+  * {
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
   }
 
   body {
-    @apply bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-white;
+    background-color: #0b0b0d;
+    color: #e2e8f0;
+    font-family: 'Geist', sans-serif;
     min-height: 100vh;
     min-height: 100dvh;
-    padding-top: var(--sat);
-    padding-bottom: var(--sab);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     -webkit-tap-highlight-color: transparent;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+}
+
+.font-mono {
+  font-family: 'Geist Mono', monospace;
+}
+
+/* Ambient Background Orbs */
+.orb {
+  position: fixed;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  filter: blur(120px);
+  z-index: 0;
+  opacity: 0.15;
+  pointer-events: none;
+}
+.orb-1 {
+  top: -200px;
+  right: -100px;
+  background: #10b981;
+}
+.orb-2 {
+  bottom: -200px;
+  left: -100px;
+  background: #0ea5e9;
 }
 
 /* Custom subtle scrollbar */
@@ -28,9 +54,9 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.4);
+  background: rgba(255, 255, 255, 0.2);
 }

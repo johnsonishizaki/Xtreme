@@ -90,14 +90,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="max-w-md mx-auto px-4 py-4 space-y-5 pb-24">
+    <div className="max-w-md mx-auto px-4 py-6 space-y-6 pb-28 text-left">
       {/* Title Bar */}
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-400">
+          <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-emerald-500">
             Preferences
           </div>
-          <h1 className="text-xl font-black text-white tracking-tight">
+          <h1 className="text-2xl font-black tracking-tight text-white">
             Settings
           </h1>
         </div>
@@ -105,7 +105,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <button
           type="button"
           onClick={handleSave}
-          className="py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-md shadow-emerald-500/20 transition-all flex items-center space-x-1.5"
+          className="py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
         >
           {isSaved ? (
             <>
@@ -121,31 +121,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </button>
       </div>
 
-      {/* User Profile Card */}
-      <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 flex items-center justify-between shadow-lg">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-black text-sm flex items-center justify-center">
-            X
-          </div>
-          <div>
-            <div className="text-sm font-bold text-white flex items-center space-x-1.5">
-              <span>Xtreme</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
-                Duty Assistant
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Weekly duty announcements ready to copy
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* Weekly Reminder Settings */}
-      <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 space-y-4 shadow-lg">
+      <div className="p-5 rounded-3xl border shadow-xl bg-white/[0.03] border-white/[0.08] text-white backdrop-blur-xl space-y-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-400">
               <Bell className="w-4 h-4" />
             </div>
             <div>
@@ -163,24 +143,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onChange={e => setFormData(p => ({ ...p, reminderEnabled: e.target.checked }))}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+            <div className="w-11 h-6 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 bg-white/10"></div>
           </label>
         </div>
 
         {formData.reminderEnabled && (
-          <div className="space-y-3 pt-2 border-t border-slate-800/80">
+          <div className="space-y-3 pt-3 border-t border-white/[0.08]">
             {/* Reminder Day */}
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">
+              <label className="text-xs font-mono font-bold block mb-1 text-slate-300">
                 Reminder Day
               </label>
               <select
                 value={formData.reminderDay}
                 onChange={e => setFormData(p => ({ ...p, reminderDay: parseInt(e.target.value, 10) }))}
-                className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                className="w-full px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border bg-black/40 border-white/[0.08] text-white"
               >
                 {daysOfWeek.map(d => (
-                  <option key={d.value} value={d.value}>
+                  <option key={d.value} value={d.value} className="bg-slate-900 text-white">
                     {d.label}
                   </option>
                 ))}
@@ -189,35 +169,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {/* Reminder Time */}
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">
+              <label className="text-xs font-mono font-bold block mb-1 text-slate-300">
                 Reminder Time
               </label>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-slate-400" />
                 <input
                   type="time"
                   value={formData.reminderTime}
                   onChange={e => setFormData(p => ({ ...p, reminderTime: e.target.value }))}
-                  className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  className="flex-1 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border bg-black/40 border-white/[0.08] text-white"
                 />
               </div>
             </div>
 
             {/* Notification Test Box */}
-            <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-              <div className="flex items-center justify-between text-xs">
+            <div className="p-3.5 rounded-2xl border space-y-2 bg-black/30 border-white/[0.08] text-white">
+              <div className="flex items-center justify-between text-xs font-mono">
                 <span className="text-slate-400">Phone Notifications:</span>
                 <span className={`font-bold ${
                   notificationState === 'granted'
-                    ? 'text-emerald-400'
-                    : 'text-amber-400'
+                    ? 'text-emerald-500'
+                    : 'text-amber-500'
                 }`}>
                   {notificationState === 'granted' ? 'Enabled' : 'Needs Permission'}
                 </span>
               </div>
 
               {testStatus && (
-                <div className="text-xs text-amber-300 bg-amber-500/15 p-2 rounded-lg leading-relaxed">
+                <div className="text-xs p-2 rounded-lg leading-relaxed font-mono text-amber-300 bg-amber-500/15">
                   {testStatus}
                 </div>
               )}
@@ -227,7 +207,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={handleRequestPermission}
-                    className="w-full py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md transition-all text-center"
+                    className="w-full py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs shadow-md transition-all text-center cursor-pointer"
                   >
                     Enable Notifications
                   </button>
@@ -235,7 +215,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={handleTestNotification}
-                    className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-all text-center"
+                    className="w-full py-2 px-3 rounded-xl font-mono text-xs border transition-all text-center cursor-pointer bg-white/[0.05] hover:bg-white/[0.08] text-slate-200 border-white/[0.08]"
                   >
                     🔔 Send Test Reminder
                   </button>
@@ -247,10 +227,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
 
       {/* WhatsApp Announcement Template */}
-      <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 space-y-3 shadow-lg">
+      <div className="p-5 rounded-3xl border shadow-xl bg-white/[0.03] border-white/[0.08] text-white backdrop-blur-xl space-y-3.5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-400">
               <MessageSquare className="w-4 h-4" />
             </div>
             <div>
@@ -265,17 +245,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             type="button"
             onClick={handleResetTemplate}
             title="Reset to default format"
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-all text-xs flex items-center space-x-1"
+            className="p-1.5 rounded-lg transition-all text-xs font-mono flex items-center gap-1 cursor-pointer text-slate-400 hover:text-white hover:bg-white/[0.06]"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span className="text-[11px]">Reset</span>
           </button>
         </div>
 
-        {/* Friendly Insert Buttons */}
+        {/* Template Variables */}
         <div className="space-y-1.5 pt-1">
-          <div className="text-[11px] font-semibold text-slate-400">
-            Tap to insert into message:
+          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400">
+            Tap to insert variable:
           </div>
           <div className="flex flex-wrap gap-1.5">
             {[
@@ -289,7 +269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 key={item.val}
                 type="button"
                 onClick={() => handleInsertVariable(item.val)}
-                className="px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-emerald-400 transition-colors"
+                className="px-2.5 py-1 rounded-xl text-xs font-mono transition-colors cursor-pointer border bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.08] text-emerald-400"
               >
                 {item.label}
               </button>
@@ -302,7 +282,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           value={formData.messageTemplate}
           onChange={e => setFormData(p => ({ ...p, messageTemplate: e.target.value }))}
           rows={7}
-          className="w-full p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+          className="w-full p-3.5 rounded-2xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none leading-relaxed border bg-black/40 border-white/[0.08] text-white"
           placeholder="Announcement template..."
         />
       </div>

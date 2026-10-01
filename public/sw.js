@@ -28,14 +28,35 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Let API requests pass through
+  // Let API requests pass through without caching
   if (event.request.url.includes('/api/')) {
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).catch(() => {
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        // Return from cache immediately
+        return cachedResponse;
+      }
+
+      return fetch(event.request).then((networkResponse) => {
+        // Cache static JS/CSS/image assets for instant future boots
+        if (
+          networkResponse &&
+          networkResponse.status === 200 &&
+          (event.request.url.includes('/assets/') ||
+           event.request.destination === 'script' ||
+           event.request.destination === 'style' ||
+           event.request.destination === 'image')
+        ) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
         if (event.request.destination === 'document') {
           return caches.match('/index.html');
         }

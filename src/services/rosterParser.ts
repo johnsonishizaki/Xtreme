@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { DutyAssignment, ParsedRosterPayload } from '../types';
 import { parseRosterWithAI } from './aiParserClient';
 
@@ -133,6 +132,7 @@ export async function parseSpreadsheet(
   buffer: ArrayBuffer,
   fileName: string
 ): Promise<ParsedRosterPayload> {
+  const XLSX = await import('xlsx');
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
   
   // Pick primary sheet

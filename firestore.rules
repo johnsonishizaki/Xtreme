@@ -1,29 +1,34 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Application settings (reminders, message template, etc.)
+    // Reusable helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Settings
     match /settings/{settingId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
-    // Duty rosters imported by Xtreme
+    // Rosters
     match /rosters/{rosterId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
-    // Parsed weekly duty assignments
+    // Duty Assignments
     match /dutyAssignments/{assignmentId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
-    // Send history when announcements are copied / marked sent
+    // Send History
     match /sendHistory/{historyId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Web push / notification subscriptions
     match /notificationSubscriptions/{subId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
   }
 }

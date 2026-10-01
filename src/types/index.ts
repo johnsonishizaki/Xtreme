@@ -42,6 +42,7 @@ export interface AppSettings {
   targetGroupHint?: string;
   googleSheetUrl?: string;
   lastSyncHash?: string;
+  theme?: 'dark' | 'light';
   updatedAt: string;
 }
 

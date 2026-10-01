@@ -1,15 +1,7 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { Header } from './components/Header';
 import { HomeScreen } from './components/HomeScreen';
-import { RosterTab } from './components/RosterTab';
-import { SendHistoryModal } from './components/SendHistoryModal';
-import { SettingsModal } from './components/SettingsModal';
-import { ReviewDataModal } from './components/ReviewDataModal';
+import { useAuth } from './services/auth.tsx';
 import {
   AppSettings,
   DutyAssignment,
@@ -25,7 +17,11 @@ import {
   getSettings,
   saveRosterWithAssignments,
   saveSettings,
-  deleteRoster
+  deleteRoster,
+  getCachedSettings,
+  getCachedRosters,
+  getCachedDutyAssignments,
+  getCachedSendHistory
 } from './services/firebase';
 import {
   SAMPLE_ASSIGNMENTS,
@@ -38,7 +34,13 @@ import {
   sendLocalNotification
 } from './services/notificationService';
 import { buildGoogleSheetCsvUrl } from './services/sheetsParser';
-import { parseSpreadsheet } from './services/rosterParser';
+
+// LAZY LOAD HEAVY SECONDARY TABS & MODALS
+// Keeps initial JS bundle ultra small so HomeScreen mounts in <50ms
+const RosterTab = React.lazy(() => import('./components/RosterTab').then(m => ({ default: m.RosterTab })));
+const SendHistoryModal = React.lazy(() => import('./components/SendHistoryModal').then(m => ({ default: m.SendHistoryModal })));
+const SettingsModal = React.lazy(() => import('./components/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const ReviewDataModal = React.lazy(() => import('./components/ReviewDataModal').then(m => ({ default: m.ReviewDataModal })));
 
 // Pure, fast hash function to determine if sheet data has significantly changed
 function getSimpleHash(str: string): string {
@@ -46,24 +48,34 @@ function getSimpleHash(str: string): string {
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
     hash = (hash << 5) - hash + char;
-    hash |= 0; // Convert to 32bit integer
+    hash |= 0;
   }
   return hash.toString(36);
 }
 
 export default function App() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'home' | 'roster' | 'history' | 'settings'>('home');
-  const [rosters, setRosters] = useState<Roster[]>([]);
-  const [assignments, setAssignments] = useState<DutyAssignment[]>([]);
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [sendHistory, setSendHistory] = useState<SendHistory[]>([]);
+
+  // SYNCHRONOUS HYDRATION FROM LOCAL CACHE FOR 0ms INSTANT LOAD
+  const [rosters, setRosters] = useState<Roster[]>(() => getCachedRosters());
+  const [assignments, setAssignments] = useState<DutyAssignment[]>(() => getCachedDutyAssignments());
+  const [settings, setSettings] = useState<AppSettings>(() => getCachedSettings());
+  const [sendHistory, setSendHistory] = useState<SendHistory[]>(() => getCachedSendHistory());
   const [reviewData, setReviewData] = useState<ParsedRosterPayload | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Load all data from Firestore (with local offline cache fallback)
-  const refreshAllData = useCallback(async () => {
+  // If local cache already has data, NEVER block UI with a loading spinner
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    return getCachedRosters().length === 0 && getCachedDutyAssignments().length === 0;
+  });
+
+  // Stale-While-Revalidate: Refresh data in the background without blanking the screen
+  const refreshAllData = useCallback(async (isInitial = false) => {
     try {
+      if (isInitial && getCachedRosters().length === 0) {
+        setIsLoading(true);
+      }
       const [fetchedSettings, fetchedRosters, fetchedAssignments, fetchedHistory] = await Promise.all([
         getSettings(),
         getRosters(),
@@ -76,26 +88,26 @@ export default function App() {
       setAssignments(fetchedAssignments);
       setSendHistory(fetchedHistory);
     } catch (err) {
-      console.error('Error refreshing app data:', err);
+      console.warn('Background sync error (serving cache):', err);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  // Sync data whenever authentication status changes (login / logout)
   useEffect(() => {
     refreshAllData();
 
-    // Register PWA service worker
+    // Register PWA service worker on mount
     if ('serviceWorker' in navigator && window.isSecureContext) {
       navigator.serviceWorker
         .register('/sw.js')
         .then(() => console.log('Service Worker registered'))
         .catch(err => console.warn('Service Worker registration skipped:', err));
     }
-  }, [refreshAllData]);
+  }, [refreshAllData, user]);
 
   // AUTOMATIC WEEKLY DUTY BACKGROUND SYNC
-  // Checks the Google Sheet in the background, only triggering the parser if the data has actually changed
   useEffect(() => {
     if (!settings.googleSheetUrl) return;
 
@@ -115,7 +127,8 @@ export default function App() {
           const encoder = new TextEncoder();
           const buffer = encoder.encode(csvText).buffer;
           
-          // Deterministic local parsing (no expensive AI unless explicitly required)
+          // Dynamically import parser on demand so it doesn't slow down startup
+          const { parseSpreadsheet } = await import('./services/rosterParser');
           const parsed = await parseSpreadsheet(buffer, 'Synced Google Sheet.csv');
 
           const newRoster: Roster = {
@@ -141,7 +154,7 @@ export default function App() {
             updatedAt: new Date().toISOString()
           }));
 
-          // Save the parsed data to Firestore and set active
+          // Save the parsed data to Firestore/PostgreSQL and set active
           await saveRosterWithAssignments(newRoster, newAssignments);
 
           // Update saved settings with new lastSyncHash
@@ -159,8 +172,6 @@ export default function App() {
           sendLocalNotification('✨ Schedule Sync Complete', {
             body: 'Your weekly teacher duty schedule has been updated with new changes.'
           });
-        } else {
-          console.log('✨ Background sync: Schedule hash matches. No changes detected.');
         }
       } catch (err) {
         console.warn('Background sync checked: No action taken or fetch skipped.', err);
@@ -183,7 +194,7 @@ export default function App() {
       if (isDay && isTime) {
         const todayKey = `xtreme_notif_${new Date().toISOString().split('T')[0]}`;
         const alreadyFiredToday = localStorage.getItem(todayKey);
-
+        
         if (!alreadyFiredToday && assignments.length > 0) {
           const sent = await sendLocalNotification('🔔 Weekly Duty Reminder', {
             body: 'Your teacher-duty announcement is ready. Tap to review and send it.'
@@ -196,7 +207,7 @@ export default function App() {
     };
 
     checkSundayReminder();
-    const timer = setInterval(checkSundayReminder, 15 * 60 * 1000); // check every 15 mins
+    const timer = setInterval(checkSundayReminder, 15 * 60 * 1000);
     return () => clearInterval(timer);
   }, [settings, assignments]);
 
@@ -210,36 +221,16 @@ export default function App() {
     return !sentToday;
   }, [settings.reminderDay, assignments, sendHistory]);
 
-  // Handle saving newly reviewed roster data with strict promise resolution
+  // Handle saving newly reviewed roster data
   const handleConfirmSaveRoster = async (newRoster: Roster, newAssignments: DutyAssignment[]): Promise<void> => {
-    console.log('[RosterSave:App] 1. handleConfirmSaveRoster received save request for roster:', {
-      id: newRoster.id,
-      name: newRoster.name,
-      totalWeeks: newAssignments.length
-    });
-
     try {
-      console.log('[RosterSave:App] 2. Awaiting Firestore batch write (saveRosterWithAssignments)...');
-      // Step 1: Wait for Firestore operations to successfully finish before triggering state updates
       await saveRosterWithAssignments(newRoster, newAssignments);
-      console.log('[RosterSave:App] 3. Firestore write resolved successfully.');
-
-      console.log('[RosterSave:App] 4. Refreshing application state from database...');
-      // Step 2: Fetch and synchronize latest verified data
       await refreshAllData();
-      console.log('[RosterSave:App] 5. Application state refreshed from backend.');
-
-      // Step 3: Switch to Home tab so user sees the newly activated duty schedule
       setActiveTab('home');
-
-      // Step 4: Display visual toast confirmation
       setSuccessToast(`🎉 ${newRoster.name} saved! ${newAssignments.length} duty weeks ready.`);
       setTimeout(() => setSuccessToast(null), 4000);
-
-      console.log('[RosterSave:App] 6. Save event lifecycle completed successfully.');
     } catch (err: any) {
       console.error('[RosterSave:App] Error in saveRosterWithAssignments chain:', err);
-      // Propagate error back to ReviewDataModal so it can alert the user and stay in editable state
       throw err;
     }
   };
@@ -280,10 +271,14 @@ export default function App() {
   const activeRoster = rosters.find(r => r.isActive) || rosters[0] || null;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-[#0b0b0d] text-[#e2e8f0] flex flex-col font-sans relative overflow-x-hidden">
+      {/* Ambient Background Orbs */}
+      <div className="orb orb-1" />
+      <div className="orb orb-2" />
+
       {/* Visual Success Toast */}
       {successToast && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-xs shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-emerald-500 text-black font-bold text-xs shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2 duration-200">
           <span>{successToast}</span>
         </div>
       )}
@@ -297,13 +292,13 @@ export default function App() {
       />
 
       {/* Main Tab Views */}
-      <main className="flex-1 overflow-x-hidden">
+      <main className="flex-1 overflow-x-hidden relative z-10">
         {isLoading ? (
           <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
             <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center animate-pulse font-black text-lg">
               X
             </div>
-            <p className="text-xs font-semibold text-slate-400">
+            <p className="text-xs font-mono text-slate-400">
               Loading Xtreme Duty Assistant...
             </p>
           </div>
@@ -322,43 +317,74 @@ export default function App() {
             )}
 
             {activeTab === 'roster' && (
-              <RosterTab
-                rosters={rosters}
-                assignments={assignments}
-                settings={settings}
-                onUpdateSettings={handleUpdateSettings}
-                onReviewParsedData={data => setReviewData(data)}
-                onRefreshData={refreshAllData}
-                onLoadSampleRoster={handleLoadSampleRoster}
-                onDeleteSampleRoster={handleDeleteSampleRoster}
-                onDeleteRoster={handleDeleteRoster}
-              />
+              <Suspense fallback={
+                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-slate-400">
+                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
+                  Opening Duty Roster...
+                </div>
+              }>
+                <RosterTab
+                  rosters={rosters}
+                  assignments={assignments}
+                  settings={settings}
+                  onUpdateSettings={handleUpdateSettings}
+                  onReviewParsedData={data => setReviewData(data)}
+                  onRefreshData={refreshAllData}
+                  onLoadSampleRoster={handleLoadSampleRoster}
+                  onDeleteSampleRoster={handleDeleteSampleRoster}
+                  onDeleteRoster={handleDeleteRoster}
+                />
+              </Suspense>
             )}
 
             {activeTab === 'history' && (
-              <SendHistoryModal
-                history={sendHistory}
-              />
+              <Suspense fallback={
+                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-slate-400">
+                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
+                  Opening Send History...
+                </div>
+              }>
+                <SendHistoryModal
+                  history={sendHistory}
+                />
+              </Suspense>
             )}
 
             {activeTab === 'settings' && (
-              <SettingsModal
-                settings={settings}
-                onUpdateSettings={handleUpdateSettings}
-              />
+              <Suspense fallback={
+                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-slate-400">
+                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
+                  Opening Settings...
+                </div>
+              }>
+                <SettingsModal
+                  settings={settings}
+                  onUpdateSettings={handleUpdateSettings}
+                />
+              </Suspense>
             )}
           </>
         )}
       </main>
 
-      {/* Modal: Review Data Before Saving to Firestore */}
+      {/* Footer */}
+      <footer className="px-6 py-4 border-t border-white/[0.08] flex flex-col sm:flex-row justify-between items-center gap-2 font-mono text-[10px] text-slate-400 opacity-60 uppercase tracking-widest bg-black/20 backdrop-blur-md relative z-10">
+        <div>[ NODE_014 ] TERMINAL_STATUS: READY</div>
+        <div>&copy; 2026 XTREME EDUCATIONAL SYSTEMS</div>
+        <div>COORDINATES: 44.3N, 21.2E &bull; ACTIVE</div>
+      </footer>
+
+      {/* Modal: Review Data Before Saving to Database */}
       {reviewData && (
-        <ReviewDataModal
-          parsedData={reviewData}
-          onConfirmSave={handleConfirmSaveRoster}
-          onClose={() => setReviewData(null)}
-        />
+        <Suspense fallback={null}>
+          <ReviewDataModal
+            parsedData={reviewData}
+            onConfirmSave={handleConfirmSaveRoster}
+            onClose={() => setReviewData(null)}
+          />
+        </Suspense>
       )}
     </div>
   );
 }
+

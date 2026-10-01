@@ -2,25 +2,15 @@ import React, { useState, useRef } from 'react';
 import {
   FileSpreadsheet,
   Upload,
-  Link,
   Sparkles,
-  CheckCircle2,
   Trash2,
   AlertCircle,
   FileText,
-  Calendar,
-  Layers,
-  FileCode,
   Loader2,
-  ExternalLink,
   Camera
 } from 'lucide-react';
 import { Roster, DutyAssignment, ParsedRosterPayload, AppSettings } from '../types';
-import { parseSpreadsheet } from '../services/rosterParser';
-import { parsePdfRoster } from '../services/pdfParser';
-import { importGoogleSheetFromUrl, parsePastedSheetData } from '../services/sheetsParser';
-import { parseRosterWithAI } from '../services/aiParserClient';
-import { deleteRoster, saveRosterWithAssignments, setActiveRoster } from '../services/firebase';
+import { deleteRoster, setActiveRoster } from '../services/firebase';
 import { formatDutyDate } from '../services/messageGenerator';
 
 interface RosterTabProps {
@@ -38,8 +28,6 @@ interface RosterTabProps {
 export const RosterTab: React.FC<RosterTabProps> = ({
   rosters,
   assignments,
-  settings,
-  onUpdateSettings,
   onReviewParsedData,
   onRefreshData,
   onLoadSampleRoster,
@@ -62,116 +50,102 @@ export const RosterTab: React.FC<RosterTabProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setIsLoading(true);
-    setErrorMessage(null);
-    setLoadingStep('Reading file contents...');
-
     try {
-      const fileName = file.name;
-      const lower = fileName.toLowerCase();
-      const arrayBuffer = await file.arrayBuffer();
+      setIsLoading(true);
+      setErrorMessage(null);
+      setLoadingStep('Reading file...');
 
-      let result: ParsedRosterPayload;
+      const fileName = file.name.toLowerCase();
 
-      if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv')) {
-        setLoadingStep('Parsing spreadsheet table...');
-        result = await parseSpreadsheet(arrayBuffer, fileName);
-      } else if (lower.endsWith('.pdf')) {
-        setLoadingStep('Extracting PDF text lines...');
-        result = await parsePdfRoster(arrayBuffer, fileName);
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
+        setLoadingStep('Parsing spreadsheet rows...');
+        const buffer = await file.arrayBuffer();
+        const { parseSpreadsheet } = await import('../services/rosterParser');
+        const parsed = await parseSpreadsheet(buffer, file.name);
+        onReviewParsedData(parsed);
+      } else if (fileName.endsWith('.pdf')) {
+        setLoadingStep('Reading PDF document pages...');
+        const buffer = await file.arrayBuffer();
+        const { parsePdfRoster } = await import('../services/pdfParser');
+        const parsed = await parsePdfRoster(buffer, file.name);
+        onReviewParsedData(parsed);
       } else if (
-        lower.endsWith('.png') ||
-        lower.endsWith('.jpg') ||
-        lower.endsWith('.jpeg') ||
-        lower.endsWith('.webp') ||
+        fileName.endsWith('.png') ||
+        fileName.endsWith('.jpg') ||
+        fileName.endsWith('.jpeg') ||
+        fileName.endsWith('.webp') ||
         file.type.startsWith('image/')
       ) {
-        setLoadingStep('Analyzing roster image with Gemini AI...');
-        const base64Data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            const b64 = dataUrl.split(',')[1] || '';
-            resolve(b64);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        result = await parseRosterWithAI('', fileName, 'image', undefined, base64Data, file.type || 'image/jpeg');
-      } else if (lower.endsWith('.txt') || lower.endsWith('.tsv')) {
-        setLoadingStep('Parsing text data...');
-        const text = new TextDecoder().decode(arrayBuffer);
-        result = await parsePastedSheetData(text, fileName.replace(/\.[^/.]+$/, ''));
+        setLoadingStep('AI analyzing schedule photo...');
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
+        const { parseRosterWithAI } = await import('../services/aiParserClient');
+        const parsed = await parseRosterWithAI('', file.name, 'image', undefined, base64, file.type || 'image/jpeg');
+        onReviewParsedData(parsed);
       } else {
-        throw new Error('Unsupported file type. Please upload Excel (.xlsx, .xls), CSV, PDF, or a photo/image (.png, .jpg)');
+        setLoadingStep('Processing text content with AI...');
+        const text = await file.text();
+        const { parseRosterWithAI } = await import('../services/aiParserClient');
+        const parsed = await parseRosterWithAI(text, file.name, 'csv');
+        onReviewParsedData(parsed);
       }
-
-      onReviewParsedData(result);
     } catch (err: any) {
-      console.error('File parsing error:', err);
-      setErrorMessage(err.message || 'Failed to read file.');
+      console.error('Error parsing file:', err);
+      setErrorMessage(err.message || 'Could not parse this file. Please verify the format.');
     } finally {
       setIsLoading(false);
-      setLoadingStep('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  // Google sheet URL import
+  // Google Sheet Link Import
   const handleGoogleSheetImport = async () => {
     if (!googleSheetUrl.trim()) return;
 
-    setIsLoading(true);
-    setErrorMessage(null);
-    setLoadingStep('Fetching Google Sheet data...');
-
     try {
-      const result = await importGoogleSheetFromUrl(googleSheetUrl);
-      onReviewParsedData(result);
-      
-      // Save Google Sheet URL to settings for automated background checks
-      await onUpdateSettings({
-        ...settings,
-        googleSheetUrl: googleSheetUrl,
-        lastSyncHash: '' // reset so next background sync populates it properly
-      });
-      
-      setGoogleSheetUrl('');
+      setIsLoading(true);
+      setErrorMessage(null);
+      setLoadingStep('Fetching Google Sheet...');
+      const { importGoogleSheetFromUrl } = await import('../services/sheetsParser');
+      const parsed = await importGoogleSheetFromUrl(googleSheetUrl);
+      onReviewParsedData(parsed);
     } catch (err: any) {
-      console.error('Google Sheet import error:', err);
-      setErrorMessage(err.message || 'Failed to fetch Google Sheet.');
+      console.error('Google Sheet import failed:', err);
+      setErrorMessage(err.message || 'Failed to import Google Sheet. Ensure it is shared publicly.');
     } finally {
       setIsLoading(false);
-      setLoadingStep('');
     }
   };
 
-  // Pasted data import
+  // Pasted Text Import
   const handlePastedDataImport = async () => {
     if (!pastedData.trim()) return;
 
-    setIsLoading(true);
-    setErrorMessage(null);
-    setLoadingStep('Interpreting pasted table...');
-
     try {
-      const result = await parsePastedSheetData(pastedData, 'Pasted Roster');
-      onReviewParsedData(result);
-      setPastedData('');
+      setIsLoading(true);
+      setErrorMessage(null);
+      setLoadingStep('Parsing pasted text...');
+      const { parsePastedSheetData } = await import('../services/sheetsParser');
+      const parsed = await parsePastedSheetData(pastedData);
+      onReviewParsedData(parsed);
     } catch (err: any) {
-      console.error('Pasted table parse error:', err);
-      setErrorMessage(err.message || 'Failed to parse pasted table.');
+      console.error('Pasted data parse failed:', err);
+      setErrorMessage(err.message || 'Failed to parse pasted text.');
     } finally {
       setIsLoading(false);
-      setLoadingStep('');
     }
   };
 
-  // Delete roster confirm handler
+  // Delete roster confirm
   const handleConfirmDelete = async () => {
     if (!rosterPendingDelete) return;
-    setIsDeletingRoster(true);
     try {
+      setIsDeletingRoster(true);
       if (onDeleteRoster) {
         await onDeleteRoster(rosterPendingDelete.id);
       } else {
@@ -198,18 +172,17 @@ export const RosterTab: React.FC<RosterTabProps> = ({
     }
   };
 
-  // Sample roster detection
   const hasSampleRoster = rosters.some(r => r.sourceType === 'sample');
 
   return (
-    <div className="max-w-md mx-auto px-4 py-4 space-y-5 pb-24">
+    <div className="max-w-md mx-auto px-4 py-6 space-y-6 pb-28 text-left">
       {/* Title */}
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+          <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-emerald-500">
             Duty Rosters
           </div>
-          <h1 className="text-xl font-black text-white tracking-tight">
+          <h1 className="text-2xl font-black tracking-tight text-white">
             Manage & Import
           </h1>
         </div>
@@ -218,27 +191,27 @@ export const RosterTab: React.FC<RosterTabProps> = ({
           <button
             type="button"
             onClick={onDeleteSampleRoster}
-            className="text-xs text-rose-400 hover:text-rose-300 bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded-xl font-semibold flex items-center space-x-1"
+            className="text-xs text-rose-500 hover:text-rose-600 bg-rose-500/10 border border-rose-500/20 px-3 py-1.5 rounded-xl font-mono font-semibold flex items-center gap-1 cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Remove Demo Data</span>
+            <span>Remove Demo</span>
           </button>
         ) : (
           <button
             type="button"
             onClick={onLoadSampleRoster}
-            className="text-xs text-amber-300 hover:text-amber-200 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl font-semibold flex items-center space-x-1"
+            className="text-xs text-amber-600 hover:text-amber-700 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl font-mono font-semibold flex items-center gap-1 cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Load Demo Roster</span>
+            <span>Load Demo</span>
           </button>
         )}
       </div>
 
       {/* Import Card */}
-      <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 space-y-4 shadow-xl">
-        <div className="flex items-center space-x-2">
-          <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+      <div className="p-5 rounded-3xl border shadow-xl bg-white/[0.03] border-white/[0.08] text-white backdrop-blur-xl space-y-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-400">
             <Upload className="w-4 h-4" />
           </div>
           <div>
@@ -250,14 +223,14 @@ export const RosterTab: React.FC<RosterTabProps> = ({
         </div>
 
         {/* Tab switch */}
-        <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800">
+        <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl border bg-black/40 border-white/[0.08]">
           <button
             type="button"
             onClick={() => { setActiveImportTab('file'); setErrorMessage(null); }}
-            className={`py-2 px-2 text-xs font-semibold rounded-xl transition-all ${
+            className={`py-2 px-2 text-xs font-mono font-semibold rounded-xl transition-all cursor-pointer ${
               activeImportTab === 'file'
-                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-emerald-500 text-black shadow-md'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             File / Photo
@@ -265,10 +238,10 @@ export const RosterTab: React.FC<RosterTabProps> = ({
           <button
             type="button"
             onClick={() => { setActiveImportTab('sheets'); setErrorMessage(null); }}
-            className={`py-2 px-2 text-xs font-semibold rounded-xl transition-all ${
+            className={`py-2 px-2 text-xs font-mono font-semibold rounded-xl transition-all cursor-pointer ${
               activeImportTab === 'sheets'
-                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-emerald-500 text-black shadow-md'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             Google Sheet
@@ -276,10 +249,10 @@ export const RosterTab: React.FC<RosterTabProps> = ({
           <button
             type="button"
             onClick={() => { setActiveImportTab('paste'); setErrorMessage(null); }}
-            className={`py-2 px-2 text-xs font-semibold rounded-xl transition-all ${
+            className={`py-2 px-2 text-xs font-mono font-semibold rounded-xl transition-all cursor-pointer ${
               activeImportTab === 'paste'
-                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-emerald-500 text-black shadow-md'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             Paste Text
@@ -288,7 +261,7 @@ export const RosterTab: React.FC<RosterTabProps> = ({
 
         {/* Error Alert */}
         {errorMessage && (
-          <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start space-x-2">
+          <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <div className="leading-relaxed">{errorMessage}</div>
           </div>
@@ -296,9 +269,9 @@ export const RosterTab: React.FC<RosterTabProps> = ({
 
         {/* Loading Spinner */}
         {isLoading && (
-          <div className="p-5 rounded-2xl bg-slate-950 border border-emerald-500/30 text-center space-y-2">
-            <Loader2 className="w-6 h-6 text-emerald-400 animate-spin mx-auto" />
-            <div className="text-xs font-bold text-white">{loadingStep}</div>
+          <div className="p-5 rounded-2xl border text-center space-y-2 bg-black/50 border-emerald-500/30 text-white">
+            <Loader2 className="w-6 h-6 text-emerald-500 animate-spin mx-auto" />
+            <div className="text-xs font-bold">{loadingStep}</div>
             <p className="text-[11px] text-slate-400">
               Analyzing table structure & identifying teachers...
             </p>
@@ -318,13 +291,13 @@ export const RosterTab: React.FC<RosterTabProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-2xl p-6 text-center transition-all bg-slate-950/40 hover:bg-slate-950/80 group active:scale-[0.99]"
+              className="w-full border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer group active:scale-[0.99] border-slate-700 hover:border-emerald-500/60 bg-black/30 hover:bg-black/50"
             >
-              <div className="flex items-center justify-center space-x-3 mb-2">
-                <FileSpreadsheet className="w-8 h-8 text-slate-500 group-hover:text-emerald-400 transition-colors" />
-                <Camera className="w-8 h-8 text-slate-500 group-hover:text-teal-400 transition-colors" />
+              <div className="flex items-center justify-center gap-3 mb-2">
+                <FileSpreadsheet className="w-8 h-8 transition-colors text-slate-500 group-hover:text-emerald-400" />
+                <Camera className="w-8 h-8 transition-colors text-slate-500 group-hover:text-teal-400" />
               </div>
-              <div className="text-sm font-bold text-white mb-1">
+              <div className="text-sm font-bold mb-1 text-white">
                 Tap to choose file or photo
               </div>
               <p className="text-xs text-slate-400">
@@ -338,29 +311,29 @@ export const RosterTab: React.FC<RosterTabProps> = ({
         {activeImportTab === 'sheets' && !isLoading && (
           <div className="space-y-3">
             <div>
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              <label className="text-[11px] font-mono font-bold uppercase tracking-wider block mb-1 text-slate-400">
                 Google Sheet Link
               </label>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2">
                 <input
                   type="url"
                   value={googleSheetUrl}
                   onChange={e => setGoogleSheetUrl(e.target.value)}
                   placeholder="https://docs.google.com/spreadsheets/d/..."
-                  className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  className="flex-1 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border bg-black/40 border-white/[0.08] text-white"
                 />
                 <button
                   type="button"
                   onClick={handleGoogleSheetImport}
                   disabled={!googleSheetUrl.trim()}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/20 transition-all shrink-0"
+                  className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black font-bold text-xs shadow-md transition-all shrink-0 cursor-pointer"
                 >
                   Import
                 </button>
               </div>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Make sure the sheet's sharing setting is set to <strong className="text-slate-300">"Anyone with the link can view"</strong>.
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              Make sure the sheet&rsquo;s sharing setting is set to <strong>&ldquo;Anyone with the link can view&rdquo;</strong>.
             </p>
           </div>
         )}
@@ -369,7 +342,7 @@ export const RosterTab: React.FC<RosterTabProps> = ({
         {activeImportTab === 'paste' && !isLoading && (
           <div className="space-y-3">
             <div>
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              <label className="text-[11px] font-mono font-bold uppercase tracking-wider block mb-1 text-slate-400">
                 Paste Spreadsheet Rows or CSV
               </label>
               <textarea
@@ -377,14 +350,14 @@ export const RosterTab: React.FC<RosterTabProps> = ({
                 onChange={e => setPastedData(e.target.value)}
                 rows={5}
                 placeholder="Copy cells from Excel or Google Sheets and paste here..."
-                className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none font-mono"
+                className="w-full p-3 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none border bg-black/40 border-white/[0.08] text-white"
               />
             </div>
             <button
               type="button"
               onClick={handlePastedDataImport}
               disabled={!pastedData.trim()}
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/20 transition-all"
+              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black font-bold text-xs shadow-md transition-all cursor-pointer"
             >
               Parse Pasted Content
             </button>
@@ -394,68 +367,68 @@ export const RosterTab: React.FC<RosterTabProps> = ({
 
       {/* Loaded Rosters List */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
+        <div className="flex items-center justify-between text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
           <span>Loaded Rosters ({rosters.length})</span>
         </div>
 
         {rosters.length === 0 ? (
-          <div className="p-6 rounded-2xl bg-slate-900/50 border border-slate-800 text-center text-xs text-slate-400">
-            No rosters loaded yet. Upload one above or tap "Load Demo Roster".
+          <div className="p-6 rounded-2xl border text-center text-xs bg-slate-900/50 border-slate-800 text-slate-400">
+            No rosters loaded yet. Upload one above or tap &ldquo;Load Demo&rdquo;.
           </div>
         ) : (
           rosters.map(roster => (
             <div
               key={roster.id}
-              className={`p-3.5 rounded-2xl border transition-all ${
+              className={`p-4 rounded-2xl border transition-all ${
                 roster.isActive
-                  ? 'bg-slate-900 border-emerald-500/50 shadow-lg shadow-emerald-950/20'
-                  : 'bg-slate-900/60 border-slate-800 opacity-70 hover:opacity-100'
+                  ? 'bg-white/[0.04] border-emerald-500/50 shadow-lg text-white'
+                  : 'bg-white/[0.02] border-white/[0.06] text-slate-300 hover:border-white/[0.12]'
               }`}
             >
               <div className="flex items-start justify-between">
-                <div className="flex items-center space-x-2.5 min-w-0">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
                     roster.isActive
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      : 'bg-slate-800 text-slate-400'
+                      : 'bg-white/[0.04] text-slate-400'
                   }`}>
                     {roster.sourceType === 'pdf' ? (
                       <FileText className="w-4 h-4" />
                     ) : roster.sourceType === 'sample' ? (
-                      <Sparkles className="w-4 h-4 text-amber-400" />
+                      <Sparkles className="w-4 h-4 text-amber-500" />
                     ) : (
                       <FileSpreadsheet className="w-4 h-4" />
                     )}
                   </div>
 
                   <div className="min-w-0">
-                    <div className="flex items-center space-x-1.5">
-                      <span className="text-xs font-bold text-white truncate">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold truncate text-white">
                         {roster.name}
                       </span>
                       {roster.sourceType === 'sample' && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">
+                        <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-amber-500/20 text-amber-300">
                           Demo
                         </span>
                       )}
                       {roster.isActive && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                        <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-emerald-500/20 text-emerald-400">
                           Active
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] font-mono mt-0.5 text-slate-400">
                       {roster.totalWeeks} weekly assignments
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-1.5 shrink-0 ml-2">
+                <div className="flex items-center gap-1.5 shrink-0 ml-2">
                   {!roster.isActive && (
                     <button
                       type="button"
                       onClick={() => handleSetActive(roster.id)}
-                      className="text-[11px] font-semibold text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition-all border border-slate-700/60"
+                      className="text-[11px] font-mono font-semibold px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.08] text-slate-300"
                     >
                       Set Active
                     </button>
@@ -465,7 +438,7 @@ export const RosterTab: React.FC<RosterTabProps> = ({
                     onClick={() => setRosterPendingDelete(roster)}
                     aria-label={`Delete ${roster.name}`}
                     title="Delete roster"
-                    className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-all"
+                    className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-500/10 transition-all cursor-pointer"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -479,7 +452,7 @@ export const RosterTab: React.FC<RosterTabProps> = ({
       {/* Roster Assignment Breakdown */}
       {assignments.length > 0 && (
         <div className="space-y-2 pt-2">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+          <div className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
             All Duty Schedule Periods ({assignments.length})
           </div>
 
@@ -487,20 +460,20 @@ export const RosterTab: React.FC<RosterTabProps> = ({
             {assignments.map((assign, idx) => (
               <div
                 key={assign.id}
-                className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs flex items-center justify-between"
+                className="p-3 rounded-xl border text-xs flex items-center justify-between bg-white/[0.03] border-white/[0.08] text-slate-200"
               >
                 <div>
-                  <div className="font-bold text-slate-200">
+                  <div className="font-bold text-slate-100">
                     {assign.weekLabel || `Week ${idx + 1}`}
                   </div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-[11px] font-mono text-slate-400">
                     {formatDutyDate(assign.startDate)} - {formatDutyDate(assign.endDate)}
                   </div>
-                  <div className="text-[11px] text-emerald-400/90 font-medium mt-0.5">
+                  <div className="text-[11px] text-emerald-600 font-semibold mt-0.5">
                     {assign.teachers.map(t => t.name).join(', ')}
                   </div>
                 </div>
-                <div className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                <div className="text-[10px] font-mono px-2 py-0.5 rounded border bg-black/40 text-slate-300 border-white/[0.08]">
                   {assign.dutyTitle || 'Campus'}
                 </div>
               </div>
@@ -511,25 +484,25 @@ export const RosterTab: React.FC<RosterTabProps> = ({
 
       {/* Modal: In-app Confirm Delete Roster */}
       {rosterPendingDelete && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-5 shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="border rounded-3xl max-w-sm w-full p-5 shadow-2xl animate-in zoom-in-95 duration-150 space-y-4 bg-[#0b0b0d] border-white/[0.08] text-white">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-500 flex items-center justify-center mx-auto">
               <Trash2 className="w-6 h-6" />
             </div>
 
             <div className="text-center space-y-1.5">
               <h3 className="text-base font-black text-white">Delete Duty Roster?</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Are you sure you want to delete <strong className="text-slate-200">"{rosterPendingDelete.name}"</strong>? This will permanently remove its <strong className="text-slate-200">{rosterPendingDelete.totalWeeks} weekly assignments</strong> from your schedule.
+              <p className="text-xs leading-relaxed text-slate-400">
+                Are you sure you want to delete <strong>&ldquo;{rosterPendingDelete.name}&rdquo;</strong>? This will permanently remove its <strong>{rosterPendingDelete.totalWeeks} weekly assignments</strong> from your schedule.
               </p>
             </div>
 
-            <div className="flex items-center space-x-2.5 pt-1">
+            <div className="flex items-center gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={() => setRosterPendingDelete(null)}
                 disabled={isDeletingRoster}
-                className="flex-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 text-xs font-bold transition-all"
+                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer border bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 border-white/[0.08]"
               >
                 Cancel
               </button>
@@ -538,7 +511,7 @@ export const RosterTab: React.FC<RosterTabProps> = ({
                 type="button"
                 onClick={handleConfirmDelete}
                 disabled={isDeletingRoster}
-                className="flex-1 py-2.5 px-3 rounded-xl bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white text-xs font-black shadow-lg shadow-rose-500/20 transition-all flex items-center justify-center space-x-1.5"
+                className="flex-1 py-2.5 px-3 rounded-xl bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white text-xs font-mono font-bold shadow-lg shadow-rose-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 {isDeletingRoster ? (
                   <>
@@ -548,7 +521,7 @@ export const RosterTab: React.FC<RosterTabProps> = ({
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    <span>Delete Roster</span>
+                    <span>Delete</span>
                   </>
                 )}
               </button>
