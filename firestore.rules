@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Application settings (reminders, message template, etc.)
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    // Duty rosters imported by Xtreme
+    match /rosters/{rosterId} {
+      allow read, write: if true;
+    }
+
+    // Parsed weekly duty assignments
+    match /dutyAssignments/{assignmentId} {
+      allow read, write: if true;
+    }
+
+    // Send history when announcements are copied / marked sent
+    match /sendHistory/{historyId} {
+      allow read, write: if true;
+    }
+
+    // Web push / notification subscriptions
+    match /notificationSubscriptions/{subId} {
+      allow read, write: if true;
+    }
+  }
+}

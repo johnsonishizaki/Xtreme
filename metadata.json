@@ -1,0 +1,8 @@
+{
+  "name": "Remix Xtreme🔥",
+  "description": "Jabo\u0027s assistant",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

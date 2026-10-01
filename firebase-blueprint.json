@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "Settings": {
+      "collection": "settings",
+      "fields": {
+        "reminderEnabled": { "type": "boolean", "description": "Whether weekly Sunday reminders are enabled" },
+        "reminderDay": { "type": "number", "description": "Day of week for reminder (0 = Sunday)" },
+        "reminderTime": { "type": "string", "description": "Time of day (e.g. 08:00)" },
+        "messageTemplate": { "type": "string", "description": "WhatsApp announcement template with variables" },
+        "whatsAppBehavior": { "type": "string", "description": "Deep link action (app, web, universal)" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      }
+    },
+    "Roster": {
+      "collection": "rosters",
+      "fields": {
+        "name": { "type": "string", "description": "File or source name" },
+        "sourceType": { "type": "string", "description": "excel, csv, pdf, sheets, sample" },
+        "totalWeeks": { "type": "number", "description": "Number of weeks parsed" },
+        "uploadedAt": { "type": "string", "description": "ISO timestamp" },
+        "isActive": { "type": "boolean", "description": "Whether this roster is active" }
+      }
+    },
+    "DutyAssignment": {
+      "collection": "dutyAssignments",
+      "fields": {
+        "rosterId": { "type": "string", "description": "Associated roster ID" },
+        "weekLabel": { "type": "string", "description": "Human readable week range (e.g. 21-27 September 2026)" },
+        "startDate": { "type": "string", "description": "ISO YYYY-MM-DD" },
+        "endDate": { "type": "string", "description": "ISO YYYY-MM-DD" },
+        "teachers": { "type": "array", "description": "Array of teacher objects with name and role" },
+        "dutyTitle": { "type": "string", "description": "Duty role or description" },
+        "status": { "type": "string", "description": "confirmed, needs_review" },
+        "confidence": { "type": "string", "description": "high, review_needed" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      }
+    },
+    "SendHistory": {
+      "collection": "sendHistory",
+      "fields": {
+        "assignmentId": { "type": "string", "description": "Target duty assignment ID" },
+        "weekLabel": { "type": "string", "description": "Duty week label" },
+        "dutyPeriod": { "type": "string", "description": "Formatted dates" },
+        "message": { "type": "string", "description": "Announcement text" },
+        "timestamp": { "type": "string", "description": "ISO timestamp of copy / send" },
+        "status": { "type": "string", "description": "copied, sent_confirmed" }
+      }
+    }
+  }
+}
