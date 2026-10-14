@@ -1,213 +1,175 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
+  Home,
   Calendar,
-  FileSpreadsheet,
+  Users,
   History,
   Settings as SettingsIcon,
-  LogIn,
-  LogOut,
-  User
+  Sun,
+  Moon
 } from 'lucide-react';
-import { Roster } from '../types';
-import { useAuth } from '../services/auth.tsx';
+import { useTheme } from '../services/themeContext';
+
+export type ActiveNavTab = 'home' | 'duty' | 'houseReports' | 'history' | 'settings';
 
 interface HeaderProps {
-  activeTab: 'home' | 'roster' | 'history' | 'settings';
-  setActiveTab: (tab: 'home' | 'roster' | 'history' | 'settings') => void;
-  activeRoster: Roster | null;
-  isSundayPending: boolean;
+  activeTab: ActiveNavTab;
+  setActiveTab: (tab: ActiveNavTab) => void;
+  isSundayPending?: boolean;
+  missingReportsCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
-  activeRoster,
-  isSundayPending
+  isSundayPending = false,
+  missingReportsCount = 0
 }) => {
-  const { user, loginWithGoogle, logout, loading } = useAuth();
-  const [showDropdown, setShowDropdown] = useState(false);
+  const { toggleTheme, isLight } = useTheme();
 
   return (
-    <header className="sticky top-0 z-30 bg-[#0b0b0d]/85 border-b border-white/[0.08] backdrop-blur-2xl px-4 sm:px-8 py-3.5 transition-colors">
-      <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        {/* Brand */}
+    <header className="sticky top-0 z-30 bg-[var(--header-bg)] border-b border-[var(--header-border)] backdrop-blur-2xl px-3 sm:px-8 py-3 transition-colors">
+      <div className="max-w-5xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-2.5">
+        {/* Brand & Mobile Actions */}
         <div className="flex items-center justify-between">
-          <div 
+          <div
             onClick={() => setActiveTab('home')}
-            className="flex items-center gap-3 cursor-pointer group"
+            className="flex items-center gap-2.5 cursor-pointer group"
           >
-            <div className="w-[42px] h-[42px] bg-emerald-500 text-black flex items-center justify-center font-black text-xl rounded-lg shadow-sm shrink-0 transition-transform active:scale-95">
+            <div className="w-9 h-9 bg-emerald-500 text-black flex items-center justify-center font-black text-lg rounded-xl shadow-md shrink-0 transition-transform active:scale-95">
               X
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h1 className="text-sm sm:text-base font-extrabold tracking-widest uppercase transition-colors text-white group-hover:text-emerald-400">
+                <h1 className="text-sm sm:text-base font-black tracking-widest uppercase transition-colors text-[var(--text-page)] group-hover:text-emerald-500">
                   XTREME
                 </h1>
-                <span className="text-[10px] font-mono font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-emerald-500 text-black">
-                  DUTY
+                <span className="text-[9px] font-mono font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-emerald-500 text-black">
+                  OPS
                 </span>
               </div>
-              <p className="text-[10px] font-mono tracking-wider uppercase text-slate-400 opacity-60">
-                System v4.3.3 / Active
+              <p className="text-[9px] font-mono tracking-wider uppercase text-[var(--text-subtle)]">
+                Senior Houseparent Suite
               </p>
             </div>
           </div>
 
-          {/* Mobile Login */}
-          <div className="sm:hidden flex items-center gap-2">
-            {loading ? (
-              <div className="w-6 h-6 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
-            ) : user ? (
-              <img 
-                src={user.photoURL || undefined} 
-                alt={user.displayName || 'User'} 
-                className="w-8 h-8 rounded-full border border-emerald-500/40 cursor-pointer"
-                onClick={() => setShowDropdown(!showDropdown)}
-              />
-            ) : (
-              <button
-                onClick={loginWithGoogle}
-                className="p-2 rounded-xl border text-xs font-mono active:scale-95 bg-white/[0.03] border-white/[0.08] text-emerald-400"
-              >
-                <LogIn className="w-4 h-4" />
-              </button>
-            )}
+          {/* Mobile Theme Toggle */}
+          <div className="md:hidden flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+              title={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+              className="p-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-page)] hover:border-[var(--card-border-hover)] transition-all active:scale-95 cursor-pointer"
+            >
+              {isLight ? (
+                <Moon className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Sun className="w-4 h-4 text-amber-400" />
+              )}
+            </button>
           </div>
         </div>
 
-        {/* Navigation & Controls */}
-        <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-          {/* Navigation Tabs */}
-          <nav className="flex items-center gap-1 p-1 rounded-xl border bg-black/40 border-white/[0.08]">
+        {/* Navigation Tabs (5 exact tabs: Home, Duty, House Reports, History, Settings) */}
+        <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto overflow-x-auto scrollbar-thin pb-0.5">
+          <nav className="flex items-center gap-1 p-1 rounded-2xl border border-[var(--card-border)] bg-[var(--nav-bg)] shrink-0">
+            {/* 1. Home */}
             <button
               type="button"
               onClick={() => setActiveTab('home')}
-              className={`relative px-3 py-1.5 rounded-lg font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'home'
-                  ? 'bg-emerald-500 text-black font-bold shadow-md'
-                  : 'text-slate-400 hover:text-white opacity-70 hover:opacity-100'
+                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
+              }`}
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>Home</span>
+            </button>
+
+            {/* 2. Duty */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('duty')}
+              className={`relative px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                activeTab === 'duty'
+                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span className={activeTab === 'home' ? 'inline' : 'hidden md:inline'}>Duty</span>
+              <span>Duty</span>
               {isSundayPending && (
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-emerald-400 animate-pulse" />
               )}
             </button>
 
+            {/* 3. House Reports */}
             <button
               type="button"
-              onClick={() => setActiveTab('roster')}
-              className={`relative px-3 py-1.5 rounded-lg font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                activeTab === 'roster'
-                  ? 'bg-emerald-500 text-black font-bold shadow-md'
-                  : 'text-slate-400 hover:text-white opacity-70 hover:opacity-100'
+              onClick={() => setActiveTab('houseReports')}
+              className={`relative px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                activeTab === 'houseReports'
+                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span className={activeTab === 'roster' ? 'inline' : 'hidden md:inline'}>Roster</span>
-              {!activeRoster && (
-                <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-rose-500 ring-2 ring-slate-400" />
+              <Users className="w-3.5 h-3.5" />
+              <span className="whitespace-nowrap">House Reports</span>
+              {missingReportsCount > 0 && (
+                <span className="absolute -top-1 -right-1 px-1 py-0.2 text-[8px] font-bold rounded-full bg-amber-400 text-black font-mono">
+                  {missingReportsCount}
+                </span>
               )}
             </button>
 
+            {/* 4. History */}
             <button
               type="button"
               onClick={() => setActiveTab('history')}
-              className={`px-3 py-1.5 rounded-lg font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'history'
-                  ? 'bg-emerald-500 text-black font-bold shadow-md'
-                  : 'text-slate-400 hover:text-white opacity-70 hover:opacity-100'
+                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
               <History className="w-3.5 h-3.5" />
-              <span className={activeTab === 'history' ? 'inline' : 'hidden md:inline'}>History</span>
+              <span>History</span>
             </button>
 
+            {/* 5. Settings */}
             <button
               type="button"
               onClick={() => setActiveTab('settings')}
-              className={`px-3 py-1.5 rounded-lg font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'settings'
-                  ? 'bg-emerald-500 text-black font-bold shadow-md'
-                  : 'text-slate-400 hover:text-white opacity-70 hover:opacity-100'
+                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
               <SettingsIcon className="w-3.5 h-3.5" />
-              <span className={activeTab === 'settings' ? 'inline' : 'hidden md:inline'}>Settings</span>
+              <span>Settings</span>
             </button>
           </nav>
 
-          {/* Desktop Auth Button */}
-          <div className="hidden sm:block relative">
-            {loading ? (
-              <div className="w-8 h-8 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
-            ) : user ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowDropdown(!showDropdown)}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono transition-all cursor-pointer bg-white/[0.03] border-white/[0.08] text-slate-200 hover:bg-white/[0.06]"
-                >
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt="" className="w-4 h-4 rounded-full" />
-                  ) : (
-                    <User className="w-3.5 h-3.5 text-emerald-500" />
-                  )}
-                  <span className="max-w-[110px] truncate">{user.displayName || user.email}</span>
-                </button>
-
-                {showDropdown && (
-                  <div className="absolute right-0 top-full mt-2 w-48 border rounded-2xl shadow-2xl py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-150 bg-[#0b0b0d] border-white/[0.08] text-white">
-                    <div className="px-4 py-2 border-b border-white/[0.08]">
-                      <p className="text-xs font-bold truncate">{user.displayName}</p>
-                      <p className="text-[10px] font-mono text-slate-400 truncate">{user.email}</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        logout();
-                        setShowDropdown(false);
-                      }}
-                      className="w-full text-left px-4 py-2 text-xs font-mono text-rose-500 hover:bg-rose-500/10 flex items-center gap-2 transition-colors cursor-pointer"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Sign Out</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button
-                onClick={loginWithGoogle}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs font-mono uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-md shadow-emerald-500/20"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Google Sign In</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile dropdown menu */}
-      {showDropdown && user && (
-        <div className="sm:hidden mt-2 border rounded-2xl shadow-xl p-3 flex items-center justify-between bg-[#0b0b0d] border-white/[0.08] text-white">
-          <div>
-            <p className="text-xs font-bold">{user.displayName}</p>
-            <p className="text-[10px] font-mono text-slate-400">{user.email}</p>
-          </div>
+          {/* Desktop Theme Switcher */}
           <button
-            onClick={() => {
-              logout();
-              setShowDropdown(false);
-            }}
-            className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20 text-xs font-mono flex items-center gap-1.5 active:scale-95"
+            type="button"
+            onClick={toggleTheme}
+            aria-label={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            title={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            className="hidden md:flex p-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-page)] hover:border-[var(--card-border-hover)] transition-all active:scale-95 cursor-pointer items-center justify-center shadow-xs shrink-0"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
+            {isLight ? (
+              <Moon className="w-4 h-4 text-emerald-600" />
+            ) : (
+              <Sun className="w-4 h-4 text-amber-400" />
+            )}
           </button>
         </div>
-      )}
+      </div>
     </header>
   );
 };

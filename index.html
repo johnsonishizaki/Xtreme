@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
-    <title>XTREME | Duty Assistant</title>
-    <meta name="description" content="Weekly teacher duty reminder assistant for Xtreme with roster parsing and ready-to-send WhatsApp announcements." />
-    <meta property="og:title" content="XTREME | Duty Assistant" />
-    <meta property="og:description" content="Weekly teacher duty reminder assistant for Xtreme with roster parsing and ready-to-send WhatsApp announcements." />
+    <title>Remix Xtreme🔥</title>
+    <meta name="description" content="Xtreme's operational assistant" />
+    <meta property="og:title" content="Remix Xtreme🔥" />
+    <meta property="og:description" content="Xtreme's operational assistant" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,6 +22,21 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="XTREME" />
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('xtreme_theme');
+          var isDark = saved ? saved === 'dark' : true;
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', isDark ? '#0b0b0d' : '#f8fafc');
+        } catch(e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

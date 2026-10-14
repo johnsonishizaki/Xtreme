@@ -5,7 +5,10 @@ import {
   MessageSquare,
   CheckCircle2,
   Save,
-  RotateCcw
+  RotateCcw,
+  Sun,
+  Moon,
+  Palette
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { DEFAULT_TEMPLATE } from '../services/firebase';
@@ -14,6 +17,7 @@ import {
   requestNotificationPermission,
   sendLocalNotification
 } from '../services/notificationService';
+import { useTheme } from '../services/themeContext';
 
 interface SettingsModalProps {
   settings: AppSettings;
@@ -25,7 +29,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onUpdateSettings
 }) => {
-  const [formData, setFormData] = useState<AppSettings>(settings);
+  const { theme, setTheme } = useTheme();
+  const [formData, setFormData] = useState<AppSettings>({
+    ...settings,
+    theme: settings.theme || theme
+  });
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [notificationState, setNotificationState] = useState(getNotificationPermission());
   const [testStatus, setTestStatus] = useState<string | null>(null);
@@ -42,6 +50,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     await onUpdateSettings(formData);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2500);
+  };
+
+  const handleThemeChange = (newTheme: 'dark' | 'light') => {
+    setTheme(newTheme);
+    setFormData(prev => ({ ...prev, theme: newTheme }));
   };
 
   const handleInsertVariable = (variable: string) => {
@@ -97,7 +110,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-emerald-500">
             Preferences
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-white">
+          <h1 className="text-2xl font-black tracking-tight text-[var(--text-page)]">
             Settings
           </h1>
         </div>
@@ -121,16 +134,81 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </button>
       </div>
 
+      {/* Theme / Appearance Selection */}
+      <div className="p-5 rounded-3xl border border-[var(--card-border)] shadow-xl bg-[var(--card-bg)] text-[var(--text-page)] backdrop-blur-xl space-y-3.5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-500">
+            <Palette className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-[var(--text-page)]">Appearance & Theme</h2>
+            <p className="text-xs text-[var(--text-muted)]">
+              Choose your preferred visual mode
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5 pt-1">
+          {/* Dark Mode Option */}
+          <button
+            type="button"
+            onClick={() => handleThemeChange('dark')}
+            className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-2 ${
+              theme === 'dark'
+                ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30 text-white'
+                : 'border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-[var(--text-muted)] hover:border-[var(--card-border-hover)]'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="w-8 h-8 rounded-xl bg-black/60 border border-white/10 flex items-center justify-center text-amber-400">
+                <Moon className="w-4 h-4" />
+              </div>
+              {theme === 'dark' && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-emerald-400/40" />
+              )}
+            </div>
+            <div>
+              <div className="text-xs font-bold text-[var(--text-page)]">Dark Mode</div>
+              <div className="text-[10px] text-[var(--text-subtle)] font-mono">High-Tech OLED</div>
+            </div>
+          </button>
+
+          {/* Light Mode Option */}
+          <button
+            type="button"
+            onClick={() => handleThemeChange('light')}
+            className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-2 ${
+              theme === 'light'
+                ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30 text-slate-900'
+                : 'border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-[var(--text-muted)] hover:border-[var(--card-border-hover)]'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-emerald-600 shadow-xs">
+                <Sun className="w-4 h-4" />
+              </div>
+              {theme === 'light' && (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-500/40" />
+              )}
+            </div>
+            <div>
+              <div className="text-xs font-bold text-[var(--text-page)]">Light Mode</div>
+              <div className="text-[10px] text-[var(--text-subtle)] font-mono">Crisp Daytime</div>
+            </div>
+          </button>
+        </div>
+      </div>
+
       {/* Weekly Reminder Settings */}
-      <div className="p-5 rounded-3xl border shadow-xl bg-white/[0.03] border-white/[0.08] text-white backdrop-blur-xl space-y-4">
+      <div className="p-5 rounded-3xl border border-[var(--card-border)] shadow-xl bg-[var(--card-bg)] text-[var(--text-page)] backdrop-blur-xl space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-400">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-500">
               <Bell className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white">Sunday Reminder</h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="text-sm font-bold text-[var(--text-page)]">Weekly Reminder</h2>
+              <p className="text-xs text-[var(--text-muted)]">
                 Alert me when the weekly duty message is ready
               </p>
             </div>
@@ -148,19 +226,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {formData.reminderEnabled && (
-          <div className="space-y-3 pt-3 border-t border-white/[0.08]">
+          <div className="space-y-3 pt-3 border-t border-[var(--card-border)]">
             {/* Reminder Day */}
             <div>
-              <label className="text-xs font-mono font-bold block mb-1 text-slate-300">
+              <label className="text-xs font-mono font-bold block mb-1 text-[var(--text-muted)]">
                 Reminder Day
               </label>
               <select
                 value={formData.reminderDay}
                 onChange={e => setFormData(p => ({ ...p, reminderDay: parseInt(e.target.value, 10) }))}
-                className="w-full px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border bg-black/40 border-white/[0.08] text-white"
+                className="w-full px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-page)]"
               >
                 {daysOfWeek.map(d => (
-                  <option key={d.value} value={d.value} className="bg-slate-900 text-white">
+                  <option key={d.value} value={d.value} className="bg-[var(--modal-bg)] text-[var(--text-page)]">
                     {d.label}
                   </option>
                 ))}
@@ -169,24 +247,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {/* Reminder Time */}
             <div>
-              <label className="text-xs font-mono font-bold block mb-1 text-slate-300">
+              <label className="text-xs font-mono font-bold block mb-1 text-[var(--text-muted)]">
                 Reminder Time
               </label>
               <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-slate-400" />
+                <Clock className="w-4 h-4 text-[var(--text-subtle)]" />
                 <input
                   type="time"
                   value={formData.reminderTime}
                   onChange={e => setFormData(p => ({ ...p, reminderTime: e.target.value }))}
-                  className="flex-1 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border bg-black/40 border-white/[0.08] text-white"
+                  className="flex-1 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-page)]"
                 />
               </div>
             </div>
 
             {/* Notification Test Box */}
-            <div className="p-3.5 rounded-2xl border space-y-2 bg-black/30 border-white/[0.08] text-white">
+            <div className="p-3.5 rounded-2xl border border-[var(--card-border)] space-y-2 bg-[var(--code-bg)] text-[var(--text-page)]">
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">Phone Notifications:</span>
+                <span className="text-[var(--text-muted)]">Phone Notifications:</span>
                 <span className={`font-bold ${
                   notificationState === 'granted'
                     ? 'text-emerald-500'
@@ -197,7 +275,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {testStatus && (
-                <div className="text-xs p-2 rounded-lg leading-relaxed font-mono text-amber-300 bg-amber-500/15">
+                <div className="text-xs p-2 rounded-lg leading-relaxed font-mono text-amber-500 bg-amber-500/10 border border-amber-500/20">
                   {testStatus}
                 </div>
               )}
@@ -215,7 +293,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={handleTestNotification}
-                    className="w-full py-2 px-3 rounded-xl font-mono text-xs border transition-all text-center cursor-pointer bg-white/[0.05] hover:bg-white/[0.08] text-slate-200 border-white/[0.08]"
+                    className="w-full py-2 px-3 rounded-xl font-mono text-xs border border-[var(--card-border)] hover:border-[var(--card-border-hover)] bg-[var(--card-bg)] text-[var(--text-page)] transition-all text-center cursor-pointer"
                   >
                     🔔 Send Test Reminder
                   </button>
@@ -227,15 +305,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
 
       {/* WhatsApp Announcement Template */}
-      <div className="p-5 rounded-3xl border shadow-xl bg-white/[0.03] border-white/[0.08] text-white backdrop-blur-xl space-y-3.5">
+      <div className="p-5 rounded-3xl border border-[var(--card-border)] shadow-xl bg-[var(--card-bg)] text-[var(--text-page)] backdrop-blur-xl space-y-3.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-400">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-500">
               <MessageSquare className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white">Announcement Message</h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="text-sm font-bold text-[var(--text-page)]">Announcement Message</h2>
+              <p className="text-xs text-[var(--text-muted)]">
                 Template used to format your WhatsApp message
               </p>
             </div>
@@ -245,7 +323,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             type="button"
             onClick={handleResetTemplate}
             title="Reset to default format"
-            className="p-1.5 rounded-lg transition-all text-xs font-mono flex items-center gap-1 cursor-pointer text-slate-400 hover:text-white hover:bg-white/[0.06]"
+            className="p-1.5 rounded-lg transition-all text-xs font-mono flex items-center gap-1 cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span className="text-[11px]">Reset</span>
@@ -254,7 +332,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Template Variables */}
         <div className="space-y-1.5 pt-1">
-          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400">
+          <div className="text-[11px] font-mono uppercase tracking-wider text-[var(--text-subtle)]">
             Tap to insert variable:
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -269,7 +347,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 key={item.val}
                 type="button"
                 onClick={() => handleInsertVariable(item.val)}
-                className="px-2.5 py-1 rounded-xl text-xs font-mono transition-colors cursor-pointer border bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.08] text-emerald-400"
+                className="px-2.5 py-1 rounded-xl text-xs font-mono transition-colors cursor-pointer border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-emerald-500 text-emerald-500"
               >
                 {item.label}
               </button>
@@ -282,7 +360,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           value={formData.messageTemplate}
           onChange={e => setFormData(p => ({ ...p, messageTemplate: e.target.value }))}
           rows={7}
-          className="w-full p-3.5 rounded-2xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none leading-relaxed border bg-black/40 border-white/[0.08] text-white"
+          className="w-full p-3.5 rounded-2xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none leading-relaxed border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-page)]"
           placeholder="Announcement template..."
         />
       </div>

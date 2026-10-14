@@ -1,34 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Reusable helpers
-    function isSignedIn() {
-      return request.auth != null;
+    // Allow public read and write access for all school duty components and houses
+    match /{document=**} {
+      allow read, write: if true;
     }
-
-    // Settings
+    
+    // Explicit collection matches for query compatibility
     match /settings/{settingId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
-    // Rosters
     match /rosters/{rosterId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
-    // Duty Assignments
     match /dutyAssignments/{assignmentId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
-    // Send History
     match /sendHistory/{historyId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
-    // Web push / notification subscriptions
+    match /houses/{houseId} {
+      allow read, write: if true;
+    }
+
+    match /terms/{termId} {
+      allow read, write: if true;
+    }
+
+    match /houseReports/{reportId} {
+      allow read, write: if true;
+    }
+
     match /notificationSubscriptions/{subId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
   }
 }

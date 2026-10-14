@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { handleRosterParseApi } from './src/server/apiHandler.ts';
-import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
+import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
 import { getOrCreateUser } from './src/db/users.ts';
 import {
   getUserSettings,
@@ -31,7 +31,7 @@ async function startServer() {
   app.use(express.json({ limit: '30mb' }));
   app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 
-  // API endpoint for Gemini roster analysis (unprotected or protected depending on usage, let's keep it open for simple parsing from any UI, or optionally require token)
+  // API endpoint for Gemini roster analysis
   app.post('/api/roster-parse', async (req, res) => {
     try {
       const result = await handleRosterParseApi(req.body);
@@ -39,6 +39,29 @@ async function startServer() {
     } catch (err: any) {
       console.error('API /api/roster-parse error:', err);
       res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    }
+  });
+
+  // Health check endpoint for Gemini AI connectivity
+  app.get('/api/ai-check', async (_req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ success: false, error: 'GEMINI_API_KEY is not configured on the server.' });
+      }
+      const testResult = await handleRosterParseApi({
+        text: 'Week 1 (08 Sep - 14 Sep 2026): Teacher Alpha, Teacher Beta',
+        fileName: 'ai_health_check.txt',
+        sourceType: 'text'
+      });
+      res.json({
+        success: true,
+        message: 'Gemini AI is connected and functioning correctly.',
+        sampleParsedCount: testResult.assignments.length
+      });
+    } catch (err: any) {
+      console.error('API /api/ai-check error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Gemini check failed' });
     }
   });
 

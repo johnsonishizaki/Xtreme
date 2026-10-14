@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
-import { Header } from './components/Header';
+import React, { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
+import { Header, type ActiveNavTab } from './components/Header';
 import { HomeScreen } from './components/HomeScreen';
 import { useAuth } from './services/auth.tsx';
+import { ThemeProvider, useTheme } from './services/themeContext';
 import {
   AppSettings,
   DutyAssignment,
   ParsedRosterPayload,
   Roster,
-  SendHistory
+  SendHistory,
+  HouseConfig,
+  HouseDailyReport,
+  AcademicTerm
 } from './types';
 import {
   DEFAULT_SETTINGS,
@@ -15,13 +19,18 @@ import {
   getRosters,
   getSendHistory,
   getSettings,
+  getHouses,
+  getTerms,
+  getHouseReports,
   saveRosterWithAssignments,
   saveSettings,
   deleteRoster,
   getCachedSettings,
   getCachedRosters,
   getCachedDutyAssignments,
-  getCachedSendHistory
+  getCachedSendHistory,
+  getCachedHouses,
+  getCachedTerms
 } from './services/firebase';
 import {
   SAMPLE_ASSIGNMENTS,
@@ -36,10 +45,10 @@ import {
 import { buildGoogleSheetCsvUrl } from './services/sheetsParser';
 
 // LAZY LOAD HEAVY SECONDARY TABS & MODALS
-// Keeps initial JS bundle ultra small so HomeScreen mounts in <50ms
-const RosterTab = React.lazy(() => import('./components/RosterTab').then(m => ({ default: m.RosterTab })));
-const SendHistoryModal = React.lazy(() => import('./components/SendHistoryModal').then(m => ({ default: m.SendHistoryModal })));
-const SettingsModal = React.lazy(() => import('./components/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const DutyTab = React.lazy(() => import('./components/DutyTab').then(m => ({ default: m.DutyTab })));
+const HouseReportingTab = React.lazy(() => import('./components/HouseReportingTab').then(m => ({ default: m.HouseReportingTab })));
+const HistoryTab = React.lazy(() => import('./components/HistoryTab').then(m => ({ default: m.HistoryTab })));
+const SettingsTab = React.lazy(() => import('./components/SettingsTab').then(m => ({ default: m.SettingsTab })));
 const ReviewDataModal = React.lazy(() => import('./components/ReviewDataModal').then(m => ({ default: m.ReviewDataModal })));
 
 // Pure, fast hash function to determine if sheet data has significantly changed
@@ -53,17 +62,23 @@ function getSimpleHash(str: string): string {
   return hash.toString(36);
 }
 
-export default function App() {
+function MainApp() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'roster' | 'history' | 'settings'>('home');
+  const { theme, setTheme } = useTheme();
+  const [activeTab, setActiveTab] = useState<ActiveNavTab>('home');
 
   // SYNCHRONOUS HYDRATION FROM LOCAL CACHE FOR 0ms INSTANT LOAD
   const [rosters, setRosters] = useState<Roster[]>(() => getCachedRosters());
   const [assignments, setAssignments] = useState<DutyAssignment[]>(() => getCachedDutyAssignments());
   const [settings, setSettings] = useState<AppSettings>(() => getCachedSettings());
   const [sendHistory, setSendHistory] = useState<SendHistory[]>(() => getCachedSendHistory());
+  const [houses, setHouses] = useState<HouseConfig[]>(() => getCachedHouses());
+  const [terms, setTerms] = useState<AcademicTerm[]>(() => getCachedTerms());
+  const [reports, setReports] = useState<HouseDailyReport[]>([]);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<string>('general');
   const [reviewData, setReviewData] = useState<ParsedRosterPayload | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
   // If local cache already has data, NEVER block UI with a loading spinner
   const [isLoading, setIsLoading] = useState<boolean>(() => {
@@ -76,23 +91,44 @@ export default function App() {
       if (isInitial && getCachedRosters().length === 0) {
         setIsLoading(true);
       }
-      const [fetchedSettings, fetchedRosters, fetchedAssignments, fetchedHistory] = await Promise.all([
+      const [
+        fetchedSettings,
+        fetchedRosters,
+        fetchedAssignments,
+        fetchedHistory,
+        fetchedHouses,
+        fetchedTerms,
+        fetchedReports
+      ] = await Promise.all([
         getSettings(),
         getRosters(),
         getDutyAssignments(),
-        getSendHistory()
+        getSendHistory(),
+        getHouses(),
+        getTerms(),
+        getHouseReports()
       ]);
 
       setSettings(fetchedSettings);
-      setRosters(fetchedRosters);
-      setAssignments(fetchedAssignments);
+      const uniqueRosters = Array.from(new Map(fetchedRosters.map(r => [r.id, r])).values());
+      const uniqueAssignments = Array.from(new Map(fetchedAssignments.map(a => [a.id, a])).values());
+      setRosters(uniqueRosters);
+      setAssignments(uniqueAssignments);
       setSendHistory(fetchedHistory);
+      setHouses(fetchedHouses);
+      setTerms(fetchedTerms);
+      setReports(fetchedReports);
+
+      // On initial fetch, synchronize theme preference from cloud settings if no local preference exists
+      if (fetchedSettings.theme && !localStorage.getItem('xtreme_theme')) {
+        setTheme(fetchedSettings.theme);
+      }
     } catch (err) {
       console.warn('Background sync error (serving cache):', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [setTheme]);
 
   // Sync data whenever authentication status changes (login / logout)
   useEffect(() => {
@@ -240,6 +276,8 @@ export default function App() {
     await saveRosterWithAssignments(SAMPLE_ROSTER, SAMPLE_ASSIGNMENTS);
     await refreshAllData();
     setActiveTab('home');
+    setSuccessToast('✨ Demo duty schedule loaded! Xtreme can now review weekly announcements.');
+    setTimeout(() => setSuccessToast(null), 4000);
   };
 
   // Delete any loaded roster
@@ -253,7 +291,8 @@ export default function App() {
       setTimeout(() => setSuccessToast(null), 3500);
     } catch (err: any) {
       console.error('Failed to delete roster:', err);
-      alert(`Failed to delete roster: ${err.message || 'Please try again.'}`);
+      setErrorToast(`Failed to delete roster: ${err.message || 'Please try again.'}`);
+      setTimeout(() => setErrorToast(null), 4000);
     }
   };
 
@@ -265,13 +304,16 @@ export default function App() {
   // Save settings update
   const handleUpdateSettings = async (newSettings: AppSettings) => {
     setSettings(newSettings);
+    if (newSettings.theme) {
+      setTheme(newSettings.theme);
+    }
     await saveSettings(newSettings);
   };
 
   const activeRoster = rosters.find(r => r.isActive) || rosters[0] || null;
 
   return (
-    <div className="min-h-screen bg-[#0b0b0d] text-[#e2e8f0] flex flex-col font-sans relative overflow-x-hidden">
+    <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-page)] flex flex-col font-sans relative overflow-x-hidden transition-colors duration-200">
       {/* Ambient Background Orbs */}
       <div className="orb orb-1" />
       <div className="orb orb-2" />
@@ -283,11 +325,17 @@ export default function App() {
         </div>
       )}
 
+      {/* Visual Error Toast */}
+      {errorToast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-rose-500 text-white font-bold text-xs shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2 duration-200">
+          <span>⚠️ {errorToast}</span>
+        </div>
+      )}
+
       {/* Header Bar */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        activeRoster={activeRoster}
         isSundayPending={isSundayPending}
       />
 
@@ -298,7 +346,7 @@ export default function App() {
             <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center animate-pulse font-black text-lg">
               X
             </div>
-            <p className="text-xs font-mono text-slate-400">
+            <p className="text-xs font-mono text-[var(--text-muted)]">
               Loading Xtreme Duty Assistant...
             </p>
           </div>
@@ -310,24 +358,26 @@ export default function App() {
                 assignments={assignments}
                 settings={settings}
                 sendHistory={sendHistory}
-                onOpenRosterModal={() => setActiveTab('roster')}
-                onRefreshHistory={refreshAllData}
-                onLoadSampleRoster={handleLoadSampleRoster}
+                houses={houses}
+                reports={reports}
+                terms={terms}
+                onNavigateTab={setActiveTab}
+                onRefreshData={refreshAllData}
               />
             )}
 
-            {activeTab === 'roster' && (
+            {activeTab === 'duty' && (
               <Suspense fallback={
-                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-slate-400">
+                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
                   <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
-                  Opening Duty Roster...
+                  Opening Duty Tab...
                 </div>
               }>
-                <RosterTab
+                <DutyTab
                   rosters={rosters}
                   assignments={assignments}
                   settings={settings}
-                  onUpdateSettings={handleUpdateSettings}
+                  sendHistory={sendHistory}
                   onReviewParsedData={data => setReviewData(data)}
                   onRefreshData={refreshAllData}
                   onLoadSampleRoster={handleLoadSampleRoster}
@@ -337,29 +387,55 @@ export default function App() {
               </Suspense>
             )}
 
-            {activeTab === 'history' && (
+            {activeTab === 'houseReports' && (
               <Suspense fallback={
-                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-slate-400">
+                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
                   <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
-                  Opening Send History...
+                  Opening House Reports...
                 </div>
               }>
-                <SendHistoryModal
-                  history={sendHistory}
+                <HouseReportingTab
+                  houses={houses}
+                  reports={reports}
+                  terms={terms}
+                  onRefreshData={refreshAllData}
+                  onOpenSettings={(section) => {
+                    if (section) setSettingsInitialSection(section);
+                    setActiveTab('settings');
+                  }}
+                />
+              </Suspense>
+            )}
+
+            {activeTab === 'history' && (
+              <Suspense fallback={
+                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
+                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
+                  Opening History...
+                </div>
+              }>
+                <HistoryTab
+                  houses={houses}
+                  reports={reports}
+                  terms={terms}
+                  dutyHistory={sendHistory}
                 />
               </Suspense>
             )}
 
             {activeTab === 'settings' && (
               <Suspense fallback={
-                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-slate-400">
+                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
                   <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
                   Opening Settings...
                 </div>
               }>
-                <SettingsModal
+                <SettingsTab
                   settings={settings}
-                  onUpdateSettings={handleUpdateSettings}
+                  houses={houses}
+                  terms={terms}
+                  onRefreshData={refreshAllData}
+                  initialSection={settingsInitialSection}
                 />
               </Suspense>
             )}
@@ -368,10 +444,8 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="px-6 py-4 border-t border-white/[0.08] flex flex-col sm:flex-row justify-between items-center gap-2 font-mono text-[10px] text-slate-400 opacity-60 uppercase tracking-widest bg-black/20 backdrop-blur-md relative z-10">
-        <div>[ NODE_014 ] TERMINAL_STATUS: READY</div>
-        <div>&copy; 2026 XTREME EDUCATIONAL SYSTEMS</div>
-        <div>COORDINATES: 44.3N, 21.2E &bull; ACTIVE</div>
+      <footer className="px-6 py-4 border-t border-[var(--card-border)] bg-[var(--footer-bg)] backdrop-blur-md flex justify-center items-center font-mono text-[10px] text-[var(--text-subtle)] uppercase tracking-widest relative z-10 transition-colors">
+        <div>&copy; 2026 Xtreme Assistant. Powered by Ishizaki.</div>
       </footer>
 
       {/* Modal: Review Data Before Saving to Database */}
@@ -388,3 +462,10 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <ThemeProvider>
+      <MainApp />
+    </ThemeProvider>
+  );
+}

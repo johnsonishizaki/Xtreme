@@ -1,5 +1,60 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Base design tokens (Light mode default on :root) */
+:root {
+  color-scheme: light;
+  --bg-page: #f8fafc;
+  --text-page: #0f172a;
+  --text-muted: #475569;
+  --text-subtle: #64748b;
+  --card-bg: #ffffff;
+  --card-bg-elevated: #f1f5f9;
+  --card-border: #e2e8f0;
+  --card-border-subtle: #edf2f7;
+  --card-border-hover: #cbd5e1;
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --header-bg: rgba(255, 255, 255, 0.92);
+  --header-border: #e2e8f0;
+  --nav-bg: #f1f5f9;
+  --pill-bg: #f1f5f9;
+  --pill-text: #475569;
+  --footer-bg: rgba(248, 250, 252, 0.95);
+  --modal-bg: #ffffff;
+  --orb-opacity: 0.05;
+  --code-bg: #f1f5f9;
+  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.08);
+}
+
+/* Dark theme overrides - Single source of truth via .dark on root with guaranteed (0,2,0) specificity */
+:root.dark,
+html.dark {
+  color-scheme: dark;
+  --bg-page: #0b0b0d;
+  --text-page: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+  --card-bg: rgba(255, 255, 255, 0.03);
+  --card-bg-elevated: rgba(255, 255, 255, 0.06);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-border-subtle: rgba(255, 255, 255, 0.05);
+  --card-border-hover: rgba(255, 255, 255, 0.16);
+  --input-bg: rgba(0, 0, 0, 0.45);
+  --input-border: rgba(255, 255, 255, 0.1);
+  --header-bg: rgba(11, 11, 13, 0.88);
+  --header-border: rgba(255, 255, 255, 0.08);
+  --nav-bg: rgba(0, 0, 0, 0.45);
+  --pill-bg: rgba(255, 255, 255, 0.03);
+  --pill-text: #94a3b8;
+  --footer-bg: rgba(0, 0, 0, 0.25);
+  --modal-bg: #0e0e11;
+  --orb-opacity: 0.14;
+  --code-bg: rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -7,8 +62,8 @@
   }
 
   body {
-    background-color: #0b0b0d;
-    color: #e2e8f0;
+    background-color: var(--bg-page);
+    color: var(--text-page);
     font-family: 'Geist', sans-serif;
     min-height: 100vh;
     min-height: 100dvh;
@@ -16,6 +71,7 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
     -webkit-tap-highlight-color: transparent;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 }
 
@@ -31,8 +87,9 @@
   border-radius: 50%;
   filter: blur(120px);
   z-index: 0;
-  opacity: 0.15;
+  opacity: var(--orb-opacity);
   pointer-events: none;
+  transition: opacity 0.3s ease;
 }
 .orb-1 {
   top: -200px;
@@ -54,9 +111,18 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(148, 163, 184, 0.2);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(148, 163, 184, 0.4);
+}
+
+/* Indeterminate progress bar loading animation */
+@keyframes progress-loading {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.animate-progress-loading {
+  animation: progress-loading 1.2s infinite linear;
 }

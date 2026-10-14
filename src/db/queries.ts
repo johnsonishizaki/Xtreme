@@ -2,7 +2,7 @@
 import { db } from './index.ts';
 import { users, settings, rosters, dutyAssignments, sendHistory } from './schema.ts';
 import { eq, desc, and } from 'drizzle-orm';
-import { AppSettings, DutyAssignment, Roster, SendHistory } from '../types';
+import type { AppSettings, DutyAssignment, Roster, SendHistory } from '../types/index.ts';
 
 // --- SETTINGS ---
 export async function getUserSettings(userId: number): Promise<AppSettings | null> {

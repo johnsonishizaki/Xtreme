@@ -2,7 +2,7 @@
 import { db } from './index.ts';
 import { users, settings } from './schema.ts';
 import { eq } from 'drizzle-orm';
-import { DEFAULT_TEMPLATE } from '../services/firebase.ts';
+import { DEFAULT_TEMPLATE } from '../constants/template.ts';
 
 export async function getOrCreateUser(uid: string, email: string) {
   try {
