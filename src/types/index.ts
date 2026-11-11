@@ -74,6 +74,7 @@ export interface HouseConfig {
   name: string; // Configurable house name (e.g. "House 1")
   category: HouseCategory;
   assignedHouseparent: string; // Configurable (e.g. "Houseparent 1") - strictly NO personal names
+  houseparentPhone?: string;
   houseCode?: string; // e.g. "H1"
   expectedStudentCount: number;
   active: boolean;
@@ -103,13 +104,18 @@ export interface HouseDailyReport {
   expectedCount: number;
   reportedCount: number;
   notReportedCount: number; // expected - reported
+  newArrivalsCount?: number;
   notReportedDetails?: string; // Follow-up notes/reasons submitted by houseparent
   notes?: string;
-  houseparent: string; // Title / identifier
+  houseparent?: string; // Title / identifier
+  houseparentName?: string;
   submittedAt: string; // ISO string
   updatedAt: string; // ISO string
-  status: 'received' | 'updated' | 'corrected';
-  source: 'google_form' | 'google_sheet' | 'manual_correction';
+  status: 'received' | 'updated' | 'corrected' | 'complete' | 'follow_up_needed';
+  source?: 'google_form' | 'google_sheet' | 'manual_correction' | 'universal_form' | 'feed_csv' | 'tally_api';
+  tallySubmissionId?: string;
+  tallyFormId?: string;
+  syncTimestamp?: string;
 }
 
 export interface DailyCollation {
@@ -155,6 +161,17 @@ export interface AppSettings {
   googleFormUrl?: string; // Base Google Form URL for house reporting
   googleFormHouseEntryId?: string; // Entry ID for prefilled house name
   googleSheetSyncUrl?: string; // Apps Script Webhook or Sheet sync URL
+  feedCsvUrl?: string; // Published Google Sheets CSV URL for Xtreme Feed tab
+  lastFeedSyncTime?: string;
+  lastFeedSyncError?: string;
+
+  // Tally Integration Settings (Form 2jBVWA)
+  tallyFormId?: string;
+  tallyApiKeyConfigured?: boolean;
+  tallyPollIntervalMinutes?: number;
+  lastTallySyncTime?: string;
+  lastTallySyncStatus?: 'success' | 'error';
+  lastTallySyncError?: string;
 
   // Push notifications
   pushNotificationsEnabled?: boolean;
@@ -163,3 +180,5 @@ export interface AppSettings {
   theme?: 'dark' | 'light';
   updatedAt: string;
 }
+
+export * from './tally.ts';

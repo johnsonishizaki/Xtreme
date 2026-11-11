@@ -66,10 +66,9 @@ Return a JSON array of weekly assignments.`;
   parts.push({ text: promptText });
 
   const candidateModels = [
-    'gemini-2.5-flash',
-    'gemini-3.1-flash-lite',
     'gemini-3.8-flash',
-    'gemini-flash-latest'
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash'
   ];
   let lastError: any = null;
 

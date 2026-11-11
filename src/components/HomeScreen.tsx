@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Copy,
   Send,
@@ -9,7 +9,10 @@ import {
   Clock,
   ArrowRight,
   ShieldCheck,
-  ChevronRight
+  ChevronRight,
+  Share2,
+  Bell,
+  Check
 } from 'lucide-react';
 import {
   DutyAssignment,
@@ -32,6 +35,9 @@ import {
   collateDailyReports
 } from '../services/firebase';
 import { getDutyBadgeConfig } from '../services/dutyBadgeHelper';
+import { checkAndTriggerDutyAlert, requestNotificationPermission, getNotificationPermission } from '../services/notificationService';
+import { WhatsAppShareModal } from './WhatsAppShareModal';
+import { UniversalHouseparentFormModal } from './UniversalHouseparentFormModal';
 
 interface HomeScreenProps {
   rosters: Roster[];
@@ -57,6 +63,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onRefreshData
 }) => {
   const [copiedNotification, setCopiedNotification] = useState(false);
+  const [isUniversalFormOpen, setIsUniversalFormOpen] = useState(false);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
 
   const todayStr = useMemo(() => {
     return new Date().toISOString().split('T')[0];
@@ -103,17 +111,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return currentWeekIdx;
   }, [currentWeekIdx, sortedAssignments.length]);
 
-  // Determine which assignment to feature on Home:
-  // If today is Friday, Saturday, or Sunday, show the upcoming week's announcement; otherwise current week
+  // ALWAYS feature THIS WEEK'S duty (never another week)
   const featuredAssignment = useMemo(() => {
     if (sortedAssignments.length === 0) return null;
-    const day = new Date().getDay();
-    const isWeekend = day === 0 || day === 5 || day === 6;
-    if (isWeekend && comingWeekIdx !== -1) {
-      return sortedAssignments[comingWeekIdx];
-    }
+    // Strictly match the week where today's date falls within [startDate, endDate]
+    const thisWeek = sortedAssignments.find(a => todayStr >= a.startDate && todayStr <= a.endDate);
+    if (thisWeek) return thisWeek;
     return currentWeekIdx !== -1 ? sortedAssignments[currentWeekIdx] : sortedAssignments[0];
-  }, [sortedAssignments, currentWeekIdx, comingWeekIdx]);
+  }, [sortedAssignments, todayStr, currentWeekIdx]);
 
   const generatedMessage = useMemo(() => {
     if (!featuredAssignment) return '';
@@ -124,6 +129,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     if (!featuredAssignment) return false;
     return sendHistory.some(h => h.assignmentId === featuredAssignment.id && h.status === 'sent_confirmed');
   }, [featuredAssignment, sendHistory]);
+
+  // Repeatedly remind and push notifications until marked done for the week
+  useEffect(() => {
+    if (featuredAssignment) {
+      const teachersText = featuredAssignment.teachers.map(t => t.name).join(', ') || 'Teachers';
+      checkAndTriggerDutyAlert(
+        featuredAssignment.id,
+        featuredAssignment.weekLabel,
+        teachersText,
+        isAlreadySent
+      );
+    }
+  }, [featuredAssignment, isAlreadySent]);
 
   const handleCopyMessage = async () => {
     if (!generatedMessage || !featuredAssignment) return;
@@ -150,12 +168,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     openWhatsApp(generatedMessage, settings.whatsAppBehavior || 'app');
   };
 
+  const handleToggleMarkDone = async () => {
+    if (!featuredAssignment || !generatedMessage) return;
+    const isNowSent = !isAlreadySent;
+    const item: SendHistory = {
+      id: `sent-${Date.now()}`,
+      assignmentId: featuredAssignment.id,
+      weekLabel: featuredAssignment.weekLabel,
+      dutyPeriod: `${formatDutyDate(featuredAssignment.startDate)} - ${formatDutyDate(featuredAssignment.endDate)}`,
+      message: generatedMessage,
+      timestamp: new Date().toISOString(),
+      status: isNowSent ? 'sent_confirmed' : 'copied'
+    };
+    await recordSendHistory(item);
+    await onRefreshData();
+  };
+
   // =======================================================
   // 2. QUESTION 2: HOW MANY STUDENTS HAVE REPORTED TODAY?
   // =======================================================
   const collation: DailyCollation = useMemo(() => {
-    return collateDailyReports(reports, houses, todayStr, activeTerm.id);
-  }, [reports, houses, todayStr, activeTerm.id]);
+    return collateDailyReports(reports, houses, todayStr);
+  }, [reports, houses, todayStr]);
 
   // ===================================
   // 3. ATTENTION / ACTIONABLE ALERTS
@@ -208,105 +242,122 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const DutyIcon = badgeConfig?.icon || ShieldCheck;
 
   return (
-    <div className="max-w-xl mx-auto px-4 py-6 space-y-6 pb-28 text-left">
-      {/* Operator Welcome Header */}
-      <div className="flex items-center justify-between">
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-6 pb-24 text-left">
+      {/* Top Header */}
+      <div className="flex items-center justify-between pb-1">
         <div>
-          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-500">
-            Senior Houseparent Command Center
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-page)]">
+          <h1 className="text-xl font-bold tracking-tight text-[var(--text-page)]">
             Xtreme
           </h1>
-          <p className="text-xs font-mono text-[var(--text-muted)] flex items-center gap-1.5 mt-0.5">
-            <Calendar className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Today: {todayDisplay}</span>
-          </p>
-        </div>
-
-        <div className="text-right">
-          <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-bold uppercase">
-            {activeTerm.termName} Active
-          </span>
+          <div className="text-xs text-[var(--text-muted)] mt-0.5">
+            {todayDisplay} · {activeTerm.termName} ({activeTerm.academicYear})
+          </div>
         </div>
       </div>
 
-      {/* ========================================================
-          CARD 1: WEEKLY TEACHER DUTY (Answers: Who is on duty?)
-          ======================================================== */}
-      <div className="p-6 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] shadow-[var(--shadow-card)] space-y-4">
-        <div className="flex items-center justify-between border-b border-[var(--card-border-subtle)] pb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-              <Calendar className="w-4 h-4" />
+      {/* PUSH & ACTION REMINDER BANNER */}
+      {featuredAssignment && !isAlreadySent && (
+        <div className="p-3.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <Bell className="w-4 h-4 animate-bounce" />
             </div>
             <div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold block">
-                Question 1
-              </span>
-              <h2 className="text-sm font-black text-[var(--text-page)] uppercase tracking-wider">
-                Weekly Teacher Duty
-              </h2>
+              <div className="text-xs font-bold text-amber-400">
+                Action Required: Send This Week&apos;s Duty Announcement
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                {featuredAssignment.weekLabel} is pending. Reminders will notify you until marked done.
+              </div>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleOpenWhatsApp}
+              className="py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Send Now</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleToggleMarkDone}
+              className="py-1.5 px-3 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] hover:bg-[var(--card-bg-elevated)] text-[var(--text-page)] text-xs font-semibold flex items-center gap-1 cursor-pointer transition-all"
+            >
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Mark Done</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 1. TEACHER DUTY */}
+      <div className="p-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-3.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-emerald-500" />
+            <h2 className="text-sm font-semibold text-[var(--text-page)]">
+              This Week&apos;s Duty
+            </h2>
           </div>
 
           <button
             type="button"
             onClick={() => onNavigateTab('duty')}
-            className="text-xs font-mono text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+            className="text-xs text-emerald-500 hover:underline flex items-center gap-1 cursor-pointer font-medium"
           >
-            <span>Duty Module</span>
+            <span>Duty Schedule</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {featuredAssignment ? (
-          <div className="space-y-3.5">
+          <div className="space-y-3">
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-[10px] font-mono text-[var(--text-muted)] uppercase">
+                <div className="text-xs text-[var(--text-muted)]">
                   {featuredAssignment.weekLabel}
                 </div>
-                <h3 className="text-lg font-black text-[var(--text-page)]">
+                <h3 className="text-base font-bold text-[var(--text-page)] mt-0.5">
                   {featuredAssignment.teachers.map(t => t.name).join(' & ') || 'Teacher on Duty'}
                 </h3>
-                <p className="text-xs font-mono text-emerald-400 flex items-center gap-1 mt-0.5">
-                  <Clock className="w-3 h-3" />
-                  <span>{formatDutyDate(featuredAssignment.startDate)} &ndash; {formatDutyDate(featuredAssignment.endDate)}</span>
+                <p className="text-xs text-[var(--text-muted)] flex items-center gap-1 mt-1">
+                  <Clock className="w-3 h-3 text-emerald-500" />
+                  <span>{formatDutyDate(featuredAssignment.startDate)} – {formatDutyDate(featuredAssignment.endDate)}</span>
                 </p>
               </div>
 
               {isAlreadySent ? (
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  ✅ Sent
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Marked Done
                 </span>
               ) : (
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                  Ready to send
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Pending
                 </span>
               )}
             </div>
 
-            {/* Quick Action Buttons */}
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
+            {/* Actions */}
+            <div className="grid grid-cols-3 gap-2 pt-1">
               <button
                 type="button"
                 onClick={handleCopyMessage}
-                className={`py-3 px-3 rounded-2xl font-mono text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md ${
-                  copiedNotification
-                    ? 'bg-emerald-500 text-black'
-                    : 'bg-emerald-500 hover:bg-emerald-400 text-black'
-                }`}
+                className="py-2 px-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-all"
               >
                 {copiedNotification ? (
                   <>
-                    <CheckCircle2 className="w-4 h-4" />
+                    <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>Copied!</span>
                   </>
                 ) : (
                   <>
-                    <Copy className="w-4 h-4" />
-                    <span>Copy Message</span>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy</span>
                   </>
                 )}
               </button>
@@ -314,20 +365,33 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <button
                 type="button"
                 onClick={handleOpenWhatsApp}
-                className="py-3 px-3 rounded-2xl font-mono text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:bg-[var(--card-bg)] text-[var(--text-page)]"
+                className="py-2 px-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:bg-[var(--card-bg)] text-[var(--text-page)] text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
               >
-                <Send className="w-4 h-4 text-emerald-500" />
-                <span>Open WhatsApp</span>
+                <Send className="w-3.5 h-3.5 text-emerald-500" />
+                <span>WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleToggleMarkDone}
+                className={`py-2 px-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                  isAlreadySent
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                    : 'border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:bg-[var(--card-bg)] text-[var(--text-page)]'
+                }`}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isAlreadySent ? 'Done' : 'Mark Done'}</span>
               </button>
             </div>
           </div>
         ) : (
-          <div className="p-4 rounded-2xl bg-[var(--card-bg-elevated)] text-center text-xs font-mono text-[var(--text-muted)] space-y-2">
+          <div className="p-4 rounded-xl bg-[var(--card-bg-elevated)] text-center text-xs text-[var(--text-muted)] space-y-2">
             <p>No duty roster currently active.</p>
             <button
               type="button"
               onClick={() => onNavigateTab('duty')}
-              className="px-3 py-1.5 rounded-xl bg-emerald-500 text-black font-bold text-xs uppercase cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black font-semibold text-xs cursor-pointer"
             >
               Open Duty Tab
             </button>
@@ -335,117 +399,140 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         )}
       </div>
 
-      {/* =========================================================================
-          CARD 2: HOUSE REPORTING (Answers: How many students have reported today?)
-          ========================================================================= */}
-      <div className="p-6 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] shadow-[var(--shadow-card)] space-y-4">
-        <div className="flex items-center justify-between border-b border-[var(--card-border-subtle)] pb-3">
+      {/* 2. HOUSE STUDENT REPORTING */}
+      <div className="p-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-3.5">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold">
-              <Users className="w-4 h-4" />
-            </div>
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-blue-400 font-bold block">
-                Question 2
-              </span>
-              <h2 className="text-sm font-black text-[var(--text-page)] uppercase tracking-wider">
-                Term Opening House Reporting
-              </h2>
-            </div>
+            <Users className="w-4 h-4 text-emerald-500" />
+            <h2 className="text-sm font-semibold text-[var(--text-page)]">
+              Student Attendance
+            </h2>
           </div>
 
           <button
             type="button"
             onClick={() => onNavigateTab('houseReports')}
-            className="text-xs font-mono text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+            className="text-xs text-emerald-500 hover:underline flex items-center gap-1 cursor-pointer font-medium"
           >
-            <span>View 8 Houses</span>
+            <span>All Houses</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="flex items-baseline justify-between">
             <div>
-              <div className="text-3xl font-black text-[var(--text-page)]">
+              <div className="text-2xl font-bold text-[var(--text-page)]">
                 {collation.totalReported}{' '}
-                <span className="text-sm font-mono text-[var(--text-muted)] font-normal">
+                <span className="text-xs text-[var(--text-muted)] font-normal">
                   / {collation.totalExpected} reported
                 </span>
               </div>
-              <div className="text-xs font-mono text-emerald-400 font-bold mt-0.5">
-                {collation.reportingPercentage}% overall attendance rate
+              <div className="text-xs text-emerald-500 font-medium mt-0.5">
+                {collation.reportingPercentage}% reporting rate
               </div>
             </div>
 
             <div className="text-right">
-              <div className="text-xl font-black text-amber-400">
+              <div className="text-lg font-bold text-amber-500">
                 {collation.totalNotReported}
               </div>
-              <div className="text-[10px] font-mono text-[var(--text-muted)]">
-                Not yet reported
+              <div className="text-[11px] text-[var(--text-muted)]">
+                Not reported
               </div>
             </div>
           </div>
 
-          {/* Progress Bar */}
-          <div className="w-full h-2.5 rounded-full bg-[var(--card-bg-elevated)] overflow-hidden">
+          {/* Progress bar */}
+          <div className="w-full h-1.5 rounded-full bg-[var(--card-bg-elevated)] overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 rounded-full transition-all duration-300"
+              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
               style={{ width: `${Math.min(100, collation.reportingPercentage)}%` }}
             />
           </div>
 
-          {/* House Reports Submissions Count */}
-          <div className="p-3 rounded-2xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)] flex items-center justify-between text-xs font-mono">
-            <span className="text-[var(--text-muted)]">House Reports Received Today:</span>
-            <span className={`font-extrabold ${
-              collation.reportsReceivedCount === collation.totalHousesCount
-                ? 'text-emerald-400'
-                : 'text-amber-400'
-            }`}>
-              {collation.reportsReceivedCount} of {collation.totalHousesCount} houses
-            </span>
+          {/* Quiet sub-stats */}
+          <div className="text-xs text-[var(--text-muted)] flex justify-between pt-0.5">
+            <span>Boys: {collation.boysReported}/{collation.boysExpected}</span>
+            <span>Girls: {collation.girlsReported}/{collation.girlsExpected}</span>
+            <span>{collation.reportsReceivedCount}/{collation.totalHousesCount} Houses in</span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => onNavigateTab('houseReports')}
-            className="w-full py-3 rounded-2xl bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 border border-blue-500/30 font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all"
-          >
-            <span>View 8 Houses Dashboard</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          {/* Quick Action Buttons for House Reporting */}
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={async () => {
+                const formUrl = 'https://tally.so/r/2jBVWA';
+                const ok = await copyToClipboard(formUrl);
+                if (ok) {
+                  openWhatsApp(`📋 *OLAG SHS — DAILY HOUSE ATTENDANCE REPORTING*\n\nDear Houseparents, please submit your house arrival report using the official form:\n👉 ${formUrl}\n\nThank you!\n— Senior Houseparent (Xtreme)`, 'app');
+                }
+              }}
+              className="py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-all"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Send Form Link</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsWhatsAppModalOpen(true)}
+              className="py-2 px-3 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:bg-[var(--card-bg)] text-[var(--text-page)] text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Send className="w-3.5 h-3.5 text-emerald-500" />
+              <span>WhatsApp Summary</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ========================================================
-          CARD 3: ATTENTION SYSTEM (Actionable Operational Alerts)
-          ======================================================== */}
+      {/* Attention Items */}
       {attentionItems.length > 0 && (
-        <div className="p-5 rounded-3xl border border-amber-500/30 bg-amber-500/5 space-y-3">
-          <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>Attention System ({attentionItems.length} alerts)</span>
+        <div className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5 space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-amber-500">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>Attention Items ({attentionItems.length})</span>
           </div>
-
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {attentionItems.map(item => (
               <div
                 key={item.id}
                 onClick={() => onNavigateTab(item.actionTab)}
-                className="p-3 rounded-2xl border border-amber-500/20 bg-[var(--card-bg)] hover:border-amber-500/50 flex items-center justify-between cursor-pointer transition-all"
+                className="p-2.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] hover:border-amber-500/40 flex items-center justify-between cursor-pointer transition-colors"
               >
-                <div>
-                  <div className="text-xs font-bold text-[var(--text-page)]">{item.title}</div>
-                  <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">{item.subtitle}</div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-amber-400" />
+                <div className="text-xs font-medium text-[var(--text-page)]">{item.title}</div>
+                <ChevronRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Universal Houseparent Reporting Form */}
+      <UniversalHouseparentFormModal
+        isOpen={isUniversalFormOpen}
+        onClose={() => setIsUniversalFormOpen(false)}
+        houses={houses}
+        activeTerm={activeTerm}
+        initialDate={todayStr}
+        onReportSubmitted={onRefreshData}
+        onOpenWhatsAppShare={() => {
+          setIsUniversalFormOpen(false);
+          setIsWhatsAppModalOpen(true);
+        }}
+      />
+
+      {/* WhatsApp Send Modal (House & Date Options) */}
+      <WhatsAppShareModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        houses={houses}
+        reports={reports}
+        activeTerm={activeTerm}
+        settings={settings}
+        initialHouseId="all"
+        initialDate={todayStr}
+      />
     </div>
   );
 };

@@ -102,43 +102,39 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       setTimeout(() => setCopiedDutyId(null), 2500);
     }
   };
-
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-6 pb-28 text-left">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6 pb-24 text-left">
       {/* Header */}
-      <div>
-        <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-emerald-500">
-          Operational Archive
-        </div>
-        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-page)]">
-          History & Trends
+      <div className="pb-1">
+        <h1 className="text-xl font-bold tracking-tight text-[var(--text-page)]">
+          History
         </h1>
         <p className="text-xs text-[var(--text-muted)] mt-0.5">
-          House reporting progression logs & duty announcement activity archive
+          Past attendance reports and sent announcements
         </p>
       </div>
 
       {/* Sub-Tab Navigation */}
-      <div className="flex rounded-2xl p-1 bg-[var(--nav-bg)] border border-[var(--card-border)]">
+      <div className="flex rounded-xl p-1 bg-[var(--nav-bg)] border border-[var(--card-border)]">
         <button
           type="button"
           onClick={() => setActiveSubTab('house')}
-          className={`flex-1 py-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
             activeSubTab === 'house'
-              ? 'bg-emerald-500 text-black shadow-md'
+              ? 'bg-emerald-500 text-black font-semibold'
               : 'text-[var(--text-muted)] hover:text-[var(--text-page)]'
           }`}
         >
           <Users className="w-3.5 h-3.5" />
-          <span>House Reporting History</span>
+          <span>House Attendance</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab('duty')}
-          className={`flex-1 py-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
             activeSubTab === 'duty'
-              ? 'bg-emerald-500 text-black shadow-md'
+              ? 'bg-emerald-500 text-black font-semibold'
               : 'text-[var(--text-muted)] hover:text-[var(--text-page)]'
           }`}
         >
@@ -149,27 +145,27 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       {/* 1. HOUSE REPORTING HISTORY SUB-TAB */}
       {activeSubTab === 'house' && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Reporting Trend Progress Chart */}
           {trendData.length > 0 && (
-            <div className="p-5 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-4">
-              <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">
-                <TrendingUp className="w-4 h-4" />
-                <span>Term Opening Reporting Progression</span>
+            <div className="p-4 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-page)]">
+                <TrendingUp className="w-4 h-4 text-emerald-500" />
+                <span>Attendance Progression</span>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {trendData.map((day, idx) => (
-                  <div key={day.date} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="font-bold text-[var(--text-page)]">
-                        Day {idx + 1} &bull; {day.date}
+                  <div key={day.date} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-[var(--text-page)]">
+                        Day {idx + 1} · {day.date}
                       </span>
-                      <span className="text-emerald-400 font-extrabold">
+                      <span className="text-emerald-500 font-semibold">
                         {day.reported} / {day.expected} ({day.percentage}%)
                       </span>
                     </div>
-                    <div className="w-full h-2 rounded-full bg-[var(--card-bg-elevated)] overflow-hidden">
+                    <div className="w-full h-1.5 rounded-full bg-[var(--card-bg-elevated)] overflow-hidden">
                       <div
                         className="h-full bg-emerald-500 rounded-full transition-all duration-300"
                         style={{ width: `${Math.min(100, day.percentage)}%` }}
@@ -181,62 +177,60 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             </div>
           )}
 
-          {/* Date Selector Pills */}
-          <div className="space-y-2">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)]">
-              Select Reporting Date ({availableDates.length} recorded)
+          {/* Date Selector */}
+          {availableDates.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-xs text-[var(--text-muted)]">
+                Dates ({availableDates.length})
+              </div>
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                {availableDates.map(dateStr => (
+                  <button
+                    key={dateStr}
+                    type="button"
+                    onClick={() => setSelectedHistoricalDate(dateStr)}
+                    className={`px-3 py-1.5 rounded-lg text-xs shrink-0 transition-all cursor-pointer border ${
+                      selectedHistoricalDate === dateStr
+                        ? 'bg-emerald-500 text-black font-semibold border-emerald-500'
+                        : 'border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-muted)] hover:text-[var(--text-page)]'
+                    }`}
+                  >
+                    {dateStr}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
-              {availableDates.map(dateStr => (
-                <button
-                  key={dateStr}
-                  type="button"
-                  onClick={() => setSelectedHistoricalDate(dateStr)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-mono shrink-0 transition-all cursor-pointer border ${
-                    selectedHistoricalDate === dateStr
-                      ? 'bg-emerald-500 text-black font-extrabold border-emerald-500 shadow-md'
-                      : 'border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-muted)] hover:text-[var(--text-page)]'
-                  }`}
-                >
-                  {dateStr}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* Historical Date Summary Box */}
-          <div className="p-5 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-4">
-            <div className="border-b border-[var(--card-border-subtle)] pb-3 flex items-center justify-between">
+          <div className="p-4 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-3">
+            <div className="border-b border-[var(--card-border-subtle)] pb-2.5 flex items-center justify-between">
               <div>
-                <div className="text-[10px] font-mono uppercase text-emerald-400 font-bold">Collation Record</div>
-                <h3 className="text-lg font-black text-[var(--text-page)]">{selectedHistoricalDate}</h3>
+                <h3 className="text-sm font-semibold text-[var(--text-page)]">{selectedHistoricalDate}</h3>
               </div>
-              <div className="text-xs font-mono px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+              <div className="text-xs font-medium text-emerald-500">
                 {historicalCollation.reportingPercentage}% Reported
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5 text-center text-xs font-mono">
-              <div className="p-3 rounded-2xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)]">
-                <div className="text-[10px] text-[var(--text-muted)]">Expected</div>
-                <div className="text-lg font-black text-[var(--text-page)] mt-0.5">{historicalCollation.totalExpected}</div>
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="p-2.5 rounded-xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)]">
+                <div className="text-[11px] text-[var(--text-muted)]">Expected</div>
+                <div className="text-base font-bold text-[var(--text-page)] mt-0.5">{historicalCollation.totalExpected}</div>
               </div>
-              <div className="p-3 rounded-2xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)]">
-                <div className="text-[10px] text-[var(--text-muted)]">Reported</div>
-                <div className="text-lg font-black text-emerald-400 mt-0.5">{historicalCollation.totalReported}</div>
+              <div className="p-2.5 rounded-xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)]">
+                <div className="text-[11px] text-[var(--text-muted)]">Reported</div>
+                <div className="text-base font-bold text-emerald-500 mt-0.5">{historicalCollation.totalReported}</div>
               </div>
-              <div className="p-3 rounded-2xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)]">
-                <div className="text-[10px] text-[var(--text-muted)]">Not Reported</div>
-                <div className="text-lg font-black text-amber-400 mt-0.5">{historicalCollation.totalNotReported}</div>
+              <div className="p-2.5 rounded-xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)]">
+                <div className="text-[11px] text-[var(--text-muted)]">Missing</div>
+                <div className="text-base font-bold text-amber-500 mt-0.5">{historicalCollation.totalNotReported}</div>
               </div>
             </div>
 
             {/* 8 Houses Breakdown for this Date */}
-            <div className="space-y-2 pt-2">
-              <div className="text-[10px] font-mono uppercase text-[var(--text-muted)] font-bold">
-                8 Houses Breakdown ({selectedHistoricalDate})
-              </div>
-              <div className="space-y-2">
+            <div className="space-y-1.5 pt-1">
+              <div className="space-y-1.5">
                 {houses.map(h => {
                   const rep = historicalDateReports.find(r => r.houseId === h.id);
                   const expected = rep ? rep.expectedCount : h.expectedStudentCount;
@@ -246,31 +240,31 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   return (
                     <div
                       key={h.id}
-                      className="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] flex items-center justify-between text-xs font-mono"
+                      className="p-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] flex items-center justify-between text-xs"
                     >
                       <div>
-                        <div className="font-bold text-[var(--text-page)] flex items-center gap-2">
+                        <div className="font-semibold text-[var(--text-page)] flex items-center gap-1.5">
                           <span className={`w-2 h-2 rounded-full ${h.category === 'Boys' ? 'bg-blue-400' : 'bg-pink-400'}`} />
                           <span>{h.name}</span>
-                          <span className="text-[10px] text-[var(--text-muted)]">({h.assignedHouseparent})</span>
+                          <span className="text-[11px] text-[var(--text-muted)]">({h.assignedHouseparent})</span>
                         </div>
                         {rep?.notReportedDetails && (
-                          <div className="text-[10px] text-amber-400/90 mt-0.5 truncate max-w-sm">
-                            ⚠️ {rep.notReportedDetails}
+                          <div className="text-[11px] text-amber-400/90 mt-0.5 truncate max-w-sm">
+                            {rep.notReportedDetails}
                           </div>
                         )}
                       </div>
 
                       <div className="text-right">
                         {rep ? (
-                          <span className="font-extrabold text-emerald-400">
+                          <span className="font-semibold text-emerald-500">
                             {reported} / {expected}
                           </span>
                         ) : (
-                          <span className="text-amber-400 font-bold">No Report Received</span>
+                          <span className="text-amber-500 font-medium">Missing</span>
                         )}
                         {notReported > 0 && (
-                          <div className="text-[10px] text-amber-400">{notReported} not reported</div>
+                          <div className="text-[10px] text-amber-500">{notReported} not reported</div>
                         )}
                       </div>
                     </div>
@@ -284,81 +278,81 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       {/* 2. DUTY ANNOUNCEMENTS HISTORY SUB-TAB */}
       {activeSubTab === 'duty' && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {/* Search Bar */}
           <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-[var(--text-subtle)]" />
+            <Search className="w-4 h-4 absolute left-3.5 top-3 text-[var(--text-muted)]" />
             <input
               type="text"
               value={dutySearchQuery}
               onChange={e => setDutySearchQuery(e.target.value)}
-              placeholder="Search sent announcements..."
-              className="w-full pl-10 pr-9 py-3 rounded-2xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-page)] shadow-inner"
+              placeholder="Search announcements..."
+              className="w-full pl-9 pr-8 py-2 rounded-xl text-xs border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-page)] focus:border-emerald-500 outline-none"
             />
             {dutySearchQuery && (
               <button
                 type="button"
                 onClick={() => setDutySearchQuery('')}
-                className="absolute right-3 top-3 text-[var(--text-subtle)] hover:text-[var(--text-page)]"
+                className="absolute right-2.5 top-2.5 text-[var(--text-muted)] hover:text-[var(--text-page)]"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
           {filteredDutyHistory.length === 0 ? (
-            <div className="p-8 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] text-center space-y-2">
-              <Clock className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-              <div className="text-sm font-bold text-[var(--text-page)]">No Announcements Found</div>
+            <div className="p-6 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] text-center space-y-1.5">
+              <Clock className="w-7 h-7 text-[var(--text-muted)] mx-auto" />
+              <div className="text-sm font-semibold text-[var(--text-page)]">No History</div>
               <p className="text-xs text-[var(--text-muted)] max-w-xs mx-auto">
-                When you tap Copy Message or Mark as Sent in the Duty tab, records appear here.
+                Sent and copied duty announcements will appear here.
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {filteredDutyHistory.map(item => (
                 <div
                   key={item.id}
-                  className="p-4 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-3 shadow-[var(--shadow-card)]"
+                  className="p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-2.5"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between text-xs">
                     <div>
-                      <span className="text-xs font-bold text-[var(--text-page)]">{item.weekLabel}</span>
-                      <div className="text-[10px] font-mono text-[var(--text-muted)]">{item.dutyPeriod}</div>
+                      <span className="font-semibold text-[var(--text-page)]">{item.weekLabel}</span>
+                      <div className="text-[11px] text-[var(--text-muted)]">{item.dutyPeriod}</div>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold uppercase">
+                    <span className="text-xs font-medium text-emerald-500">
                       {item.status === 'sent_confirmed' ? 'Sent' : 'Copied'}
                     </span>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-[var(--code-bg)] border border-[var(--card-border-subtle)] text-xs font-mono whitespace-pre-wrap leading-relaxed text-[var(--text-page)]">
+                  <div className="p-2.5 rounded-lg bg-[var(--code-bg)] border border-[var(--card-border-subtle)] text-xs font-mono whitespace-pre-wrap leading-relaxed text-[var(--text-page)] max-h-36 overflow-y-auto scrollbar-thin">
                     {item.message}
                   </div>
 
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-[10px] font-mono text-[var(--text-subtle)] flex items-center gap-1">
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="text-[11px] text-[var(--text-muted)] flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      <span>{new Date(item.timestamp).toLocaleString()}</span>
+                      <span>{new Date(item.timestamp).toLocaleDateString()}</span>
                     </span>
 
                     <button
                       type="button"
                       onClick={() => handleReCopyDuty(item)}
-                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer border ${
                         copiedDutyId === item.id
-                          ? 'bg-emerald-500 text-black border-emerald-500'
-                          : 'border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-emerald-500 text-[var(--text-page)]'
+                          ? 'bg-emerald-500 text-black border-emerald-500 font-semibold'
+                          : 'border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:bg-[var(--card-bg)] text-[var(--text-page)]'
                       }`}
                     >
                       {copiedDutyId === item.id ? (
                         <>
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Copied!</span>
+                          <span>Copied</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>Copy Again</span>
+                          <span>Copy</span>
                         </>
                       )}
                     </button>

@@ -46,6 +46,20 @@
         "timestamp": { "type": "string", "description": "ISO timestamp of copy / send" },
         "status": { "type": "string", "description": "copied, sent_confirmed" }
       }
+    },
+    "GoogleFormsSubmission": {
+      "collection": "googleFormsSubmissions",
+      "fields": {
+        "submissionId": { "type": "string", "description": "Unique Google Forms response identifier" },
+        "reportId": { "type": "string", "description": "Associated house daily report ID" },
+        "houseId": { "type": "string", "description": "OLAG house ID" },
+        "houseName": { "type": "string", "description": "OLAG house name" },
+        "reportingDate": { "type": "string", "description": "Date YYYY-MM-DD" },
+        "reportedCount": { "type": "number", "description": "Students present count" },
+        "newArrivalsCount": { "type": "number", "description": "New arrivals count" },
+        "receivedAt": { "type": "string", "description": "ISO timestamp received" },
+        "status": { "type": "string", "description": "imported or rejected" }
+      }
     }
   }
 }

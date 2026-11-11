@@ -1,6 +1,0 @@
-{
-  "summary":  "Implementation plan to completely remove the multi-theme switching system and lock the application into its signature OLED dark mode aesthetic, simplifying CSS and eliminating unnecessary theme context, toggle buttons, and settings controls.",
-  "updatedAt":  "2026-10-03T12:06:18.507626174Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

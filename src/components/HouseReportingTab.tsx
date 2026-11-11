@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Calendar,
   Copy,
@@ -14,22 +14,36 @@ import {
   ExternalLink,
   Lock,
   Unlock,
-  Loader2
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Link,
+  Send,
+  Smartphone,
+  Share2,
+  Radio
 } from 'lucide-react';
+import { getTallyStatus, syncTallyNow } from '../services/tallyClient';
 import {
   HouseConfig,
   HouseDailyReport,
   AcademicTerm,
-  DailyCollation
+  DailyCollation,
+  AppSettings
 } from '../types';
-import { collateDailyReports, setTermStatus } from '../services/firebase';
-import { copyToClipboard } from '../services/messageGenerator';
+import { collateDailyReports, setTermStatus, DEFAULT_SETTINGS } from '../services/firebase';
+import { DEFAULT_TERM } from '../services/sampleData';
+import { copyToClipboard, formatDutyDate } from '../services/messageGenerator';
 import { HouseDetailModal } from './HouseDetailModal';
+import { SendFormLinkModal } from './SendFormLinkModal';
+import { UniversalHouseparentFormModal } from './UniversalHouseparentFormModal';
+import { WhatsAppShareModal } from './WhatsAppShareModal';
 
 interface HouseReportingTabProps {
   houses: HouseConfig[];
   reports: HouseDailyReport[];
   terms: AcademicTerm[];
+  settings?: AppSettings;
   onRefreshData: () => Promise<void>;
   onOpenSettings: (subSection?: string) => void;
 }
@@ -38,11 +52,12 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
   houses,
   reports,
   terms,
+  settings = DEFAULT_SETTINGS,
   onRefreshData,
   onOpenSettings
 }) => {
   const activeTerm = useMemo(() => {
-    return terms.find(t => t.status === 'open') || terms[0];
+    return terms.find(t => t.status === 'open') || terms[0] || DEFAULT_TERM;
   }, [terms]);
 
   // Selected reporting date (defaults to today's date or the active term opening date)
@@ -53,9 +68,102 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
   });
 
   const [selectedHouseForDetail, setSelectedHouseForDetail] = useState<HouseConfig | null>(null);
+  const [isSendFormLinkOpen, setIsSendFormLinkOpen] = useState(false);
+  const [isUniversalFormOpen, setIsUniversalFormOpen] = useState(false);
+  const [universalFormHouseId, setUniversalFormHouseId] = useState<string | undefined>(undefined);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [whatsAppModalHouseId, setWhatsAppModalHouseId] = useState<string>('all');
+  // Available reporting dates from received reports (Today always first)
+  const availableDates = useMemo(() => {
+    const datesSet = new Set<string>();
+    const todayStr = new Date().toISOString().split('T')[0];
+    datesSet.add(todayStr);
+    for (const r of reports) {
+      if (r.reportingDate) datesSet.add(r.reportingDate);
+    }
+    const allSorted = Array.from(datesSet).sort().reverse();
+    return [todayStr, ...allSorted.filter(d => d !== todayStr)];
+  }, [reports]);
+
+  // Auto-switch selectedDate to today if today has reports, or latest report date <= today
+  useEffect(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayReports = reports.filter(r => r.reportingDate === todayStr);
+    if (todayReports.length > 0) {
+      if (selectedDate !== todayStr) {
+        setSelectedDate(todayStr);
+      }
+    } else if (reports.length > 0) {
+      const reportsForSelected = reports.filter(r => r.reportingDate === selectedDate);
+      if (reportsForSelected.length === 0) {
+        // Only select valid report dates <= todayStr, never future dates
+        const validPastOrToday = reports
+          .map(r => r.reportingDate)
+          .filter(d => d && d <= todayStr)
+          .sort()
+          .reverse();
+        const latestReportDate = validPastOrToday[0];
+        if (latestReportDate) {
+          setSelectedDate(latestReportDate);
+        }
+      }
+    }
+  }, [reports]);
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [followUpFilterHouse, setFollowUpFilterHouse] = useState<string>('all');
   const [isTogglingPeriod, setIsTogglingPeriod] = useState(false);
+
+  // Automated synchronization every 1 second (zero buttons to press)
+  useEffect(() => {
+    let isMounted = true;
+    let timer: NodeJS.Timeout | null = null;
+
+    const performSyncCycle = async () => {
+      try {
+        if (!isMounted) return;
+        // 1. Refresh reports from database every second
+        await onRefreshData();
+
+        // 2. Also check backend Tally API synchronization if configured
+        const status = await getTallyStatus();
+        if (!isMounted) return;
+        if (status.hasApiKey && !status.isSyncInProgress && document.visibilityState === 'visible') {
+          const res = await syncTallyNow();
+          if (isMounted && res.success && res.newReportsImported > 0) {
+            await onRefreshData();
+          }
+        }
+      } catch (err) {
+        console.warn('[HouseReportingTab] Auto-sync notice:', err);
+      }
+    };
+
+    // Initial sync
+    performSyncCycle();
+
+    // 1-second recurring timer for active session
+    timer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        performSyncCycle();
+      }
+    }, 1000);
+
+    return () => {
+      isMounted = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [onRefreshData]);
+
+  const handleOpenUniversalForm = (houseId?: string) => {
+    setUniversalFormHouseId(houseId || houses[0]?.id);
+    setIsUniversalFormOpen(true);
+  };
+
+  const handleOpenWhatsAppModal = (houseId: string = 'all', date?: string) => {
+    setWhatsAppModalHouseId(houseId);
+    if (date) setSelectedDate(date);
+    setIsWhatsAppModalOpen(true);
+  };
 
   // Collate data for selected date and active term
   const collation: DailyCollation = useMemo(() => {
@@ -70,12 +178,12 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
   const dateReportsMap = useMemo(() => {
     const map = new Map<string, HouseDailyReport>();
     for (const r of reports) {
-      if (r.reportingDate === selectedDate && r.termId === activeTerm.id) {
+      if (r.reportingDate === selectedDate) {
         map.set(r.houseId, r);
       }
     }
     return map;
-  }, [reports, selectedDate, activeTerm.id]);
+  }, [reports, selectedDate]);
 
   // List of reports with follow-up details
   const followUpItems = useMemo(() => {
@@ -136,30 +244,43 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
       const nextStatus = activeTerm.status === 'open' ? 'closed' : 'open';
       await setTermStatus(activeTerm.id, nextStatus);
       await onRefreshData();
+    } catch (err: any) {
+      console.error('Failed to update term status:', err);
     } finally {
       setIsTogglingPeriod(false);
     }
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-6 pb-28 text-left">
-      {/* Top Title & Academic Term Badge */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6 pb-24 text-left">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-1">
         <div>
-          <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-emerald-500">
-            Senior Houseparent Operational Suite
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--text-page)]">
+          <h1 className="text-xl font-bold tracking-tight text-[var(--text-page)]">
             House Reporting
           </h1>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            8-House student reporting collation & opening attendance tracking
-          </p>
+          <div className="text-xs text-[var(--text-muted)] mt-0.5">
+            8 Houses · {activeTerm.termName} ({activeTerm.academicYear})
+          </div>
         </div>
 
-        {/* Date Selector & Term Status */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] text-xs font-mono">
+        {/* Date Selector & Period State */}
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {availableDates.length > 1 && (
+            <select
+              value={selectedDate}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="px-2.5 py-1.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] text-xs text-[var(--text-page)] font-medium focus:outline-none cursor-pointer"
+            >
+              {availableDates.map(d => (
+                <option key={d} value={d}>
+                  {d === new Date().toISOString().split('T')[0] ? `Today (${d})` : d}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] text-xs">
             <Calendar className="w-3.5 h-3.5 text-emerald-500" />
             <input
               type="date"
@@ -168,169 +289,107 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
               className="bg-transparent text-[var(--text-page)] focus:outline-none cursor-pointer"
             />
           </div>
-
-          <button
-            type="button"
-            onClick={handleToggleTermPeriod}
-            disabled={isTogglingPeriod}
-            title={activeTerm.status === 'open' ? 'Click to Close Reporting Period' : 'Click to Reopen Reporting Period'}
-            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1 cursor-pointer transition-all border disabled:opacity-60 ${
-              activeTerm.status === 'open'
-                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25'
-                : 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
-            }`}
-          >
-            {isTogglingPeriod ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span>Updating...</span>
-              </>
-            ) : activeTerm.status === 'open' ? (
-              <>
-                <Unlock className="w-3 h-3" />
-                <span>Period Open</span>
-              </>
-            ) : (
-              <>
-                <Lock className="w-3 h-3" />
-                <span>Period Closed</span>
-              </>
-            )}
-          </button>
         </div>
       </div>
 
+      {/* ACTION TOOLBAR */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setIsSendFormLinkOpen(true)}
+          className="py-2 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+          <span>Send Form Link</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleOpenWhatsAppModal('all', selectedDate)}
+          className="py-2 px-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:bg-[var(--card-bg)] text-[var(--text-page)] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all"
+        >
+          <Send className="w-3.5 h-3.5 text-emerald-500" />
+          <span>Send Summary on WhatsApp</span>
+        </button>
+      </div>
+
       {/* DAILY SCHOOL REPORT COLLATION CARD */}
-      <div className="p-6 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] shadow-[var(--shadow-card)] space-y-5">
-        <div className="flex items-center justify-between border-b border-[var(--card-border-subtle)] pb-3">
+      <div className="p-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-4">
+        <div className="flex items-center justify-between">
           <div>
-            <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold">
-              {activeTerm.termName} ({activeTerm.academicYear}) &bull; Collation
-            </div>
-            <h2 className="text-lg font-black text-[var(--text-page)]">
-              Term Opening Report
+            <h2 className="text-sm font-semibold text-[var(--text-page)]">
+              Daily Summary
             </h2>
+            <div className="text-xs text-[var(--text-muted)] mt-0.5">
+              {formatDutyDate(selectedDate)}
+            </div>
           </div>
 
           <button
             type="button"
             onClick={handleCopySummary}
-            className={`px-3.5 py-2 rounded-xl font-mono text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-              copiedSummary
-                ? 'bg-emerald-500 text-black border-emerald-500 shadow-lg shadow-emerald-500/20'
-                : 'border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-emerald-500 text-[var(--text-page)]'
-            }`}
+            className="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:bg-[var(--card-bg)] text-xs font-medium text-[var(--text-page)] flex items-center gap-1 cursor-pointer transition-all"
           >
-            {copiedSummary ? (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Summary Copied!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4 text-emerald-500" />
-                <span>Copy Daily Summary</span>
-              </>
-            )}
+            {copiedSummary ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+            <span>{copiedSummary ? 'Copied' : 'Copy'}</span>
           </button>
         </div>
 
-        {/* 4 Big Metrics Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3.5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-center">
-            <div className="text-[10px] font-mono uppercase text-[var(--text-muted)]">Total Expected</div>
-            <div className="text-2xl font-black text-[var(--text-page)] mt-1">
-              {collation.totalExpected}
-            </div>
-            <div className="text-[10px] font-mono text-[var(--text-subtle)] mt-0.5">Students</div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-center">
-            <div className="text-[10px] font-mono uppercase text-[var(--text-muted)]">Total Reported</div>
-            <div className="text-2xl font-black text-emerald-400 mt-1">
+        {/* Clean Numerical Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1 border-t border-[var(--card-border-subtle)]">
+          <div>
+            <div className="text-xs text-[var(--text-muted)]">Reported</div>
+            <div className="text-2xl font-bold text-emerald-500 mt-0.5">
               {collation.totalReported}
             </div>
-            <div className="text-[10px] font-mono text-emerald-500/80 mt-0.5">
-              {collation.reportingPercentage}% rate
+            <div className="text-[11px] text-[var(--text-muted)]">{collation.reportingPercentage}%</div>
+          </div>
+
+          <div>
+            <div className="text-xs text-[var(--text-muted)]">Quota</div>
+            <div className="text-2xl font-bold text-[var(--text-page)] mt-0.5">
+              {collation.totalExpected}
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-center">
-            <div className="text-[10px] font-mono uppercase text-[var(--text-muted)]">Not Yet Reported</div>
-            <div className={`text-2xl font-black mt-1 ${
-              collation.totalNotReported > 0 ? 'text-amber-400' : 'text-emerald-400'
-            }`}>
+          <div>
+            <div className="text-xs text-[var(--text-muted)]">Missing</div>
+            <div className={`text-2xl font-bold mt-0.5 ${collation.totalNotReported > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
               {collation.totalNotReported}
             </div>
-            <div className="text-[10px] font-mono text-[var(--text-subtle)] mt-0.5">Remaining</div>
           </div>
 
-          <div className="p-3.5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-center">
-            <div className="text-[10px] font-mono uppercase text-[var(--text-muted)]">House Reports</div>
-            <div className={`text-2xl font-black mt-1 ${
-              collation.reportsReceivedCount === collation.totalHousesCount
-                ? 'text-emerald-400'
-                : 'text-amber-400'
-            }`}>
-              {collation.reportsReceivedCount} / {collation.totalHousesCount}
+          <div>
+            <div className="text-xs text-[var(--text-muted)]">Received</div>
+            <div className="text-2xl font-bold text-[var(--text-page)] mt-0.5">
+              {collation.reportsReceivedCount}/{collation.totalHousesCount}
             </div>
-            <div className="text-[10px] font-mono text-[var(--text-subtle)] mt-0.5">Submitted</div>
           </div>
         </div>
 
-        {/* Category Breakdown (Boys vs Girls) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-          <div className="p-3.5 rounded-2xl border border-blue-500/20 bg-blue-500/5 space-y-2">
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="font-bold text-blue-400">BOYS HOUSES (4)</span>
-              <span className="font-extrabold text-[var(--text-page)]">
-                {collation.boysReported} / {collation.boysExpected} ({collation.boysPercentage}%)
-              </span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-blue-950/40 overflow-hidden">
-              <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                style={{ width: `${Math.min(100, collation.boysPercentage)}%` }}
-              />
-            </div>
-            <div className="text-[10px] font-mono text-[var(--text-muted)] flex justify-between">
-              <span>Not reported: {collation.boysNotReported}</span>
-              <span>4 houses</span>
-            </div>
-          </div>
+        {/* Hairline Progress bar */}
+        <div className="w-full h-1.5 rounded-full bg-[var(--card-bg-elevated)] overflow-hidden">
+          <div
+            className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+            style={{ width: `${Math.min(100, collation.reportingPercentage)}%` }}
+          />
+        </div>
 
-          <div className="p-3.5 rounded-2xl border border-pink-500/20 bg-pink-500/5 space-y-2">
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="font-bold text-pink-400">GIRLS HOUSES (4)</span>
-              <span className="font-extrabold text-[var(--text-page)]">
-                {collation.girlsReported} / {collation.girlsExpected} ({collation.girlsPercentage}%)
-              </span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-pink-950/40 overflow-hidden">
-              <div
-                className="h-full bg-pink-500 rounded-full transition-all duration-300"
-                style={{ width: `${Math.min(100, collation.girlsPercentage)}%` }}
-              />
-            </div>
-            <div className="text-[10px] font-mono text-[var(--text-muted)] flex justify-between">
-              <span>Not reported: {collation.girlsNotReported}</span>
-              <span>4 houses</span>
-            </div>
-          </div>
+        {/* Clean inline breakdown */}
+        <div className="text-xs text-[var(--text-muted)] flex flex-wrap justify-between gap-2 pt-1 border-t border-[var(--card-border-subtle)]">
+          <span>Boys: <strong className="text-[var(--text-page)] font-semibold">{collation.boysReported}/{collation.boysExpected}</strong> ({collation.boysPercentage}%)</span>
+          <span>Girls: <strong className="text-[var(--text-page)] font-semibold">{collation.girlsReported}/{collation.girlsExpected}</strong> ({collation.girlsPercentage}%)</span>
         </div>
       </div>
 
-      {/* MISSING HOUSE REPORTS ALERT (Distinguishes Report Missing vs Students Missing) */}
+      {/* COMPACT PENDING HOUSES CHIP (Debloated) */}
       {collation.missingHouseIds.length > 0 && (
-        <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 space-y-2.5">
-          <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>House Reports Missing for {selectedDate} ({collation.missingHouseIds.length})</span>
+        <div className="p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-amber-500 font-medium">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>{collation.missingHouseIds.length} houses pending report for {formatDutyDate(selectedDate)}</span>
           </div>
-          <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-            The following houseparent(s) have not yet submitted their daily report. Tap a house to manually log their count or remind them:
-          </p>
-          <div className="flex flex-wrap gap-2 pt-1">
+          <div className="flex flex-wrap gap-1.5">
             {collation.missingHouseIds.map(hId => {
               const house = houses.find(h => h.id === hId);
               if (!house) return null;
@@ -338,12 +397,10 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
                 <button
                   key={hId}
                   type="button"
-                  onClick={() => setSelectedHouseForDetail(house)}
-                  className="px-3 py-1.5 rounded-xl border border-amber-500/40 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                  onClick={() => handleOpenUniversalForm(house.id)}
+                  className="px-2 py-0.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-[11px] font-medium flex items-center gap-1 cursor-pointer transition-colors"
                 >
                   <span>{house.name}</span>
-                  <span className="text-[10px] opacity-75">({house.assignedHouseparent})</span>
-                  <ChevronRight className="w-3 h-3" />
                 </button>
               );
             })}
@@ -353,9 +410,9 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
 
       {/* 8 HOUSES GRID: BOYS (4) */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between text-xs font-mono font-bold uppercase tracking-wider text-blue-400">
+        <div className="flex items-center justify-between text-xs font-semibold text-[var(--text-muted)]">
           <span>Boys Houses (4)</span>
-          <span className="text-[var(--text-subtle)] font-normal">Tap any house for details / correction</span>
+          <span className="text-[11px] font-normal">Tap card to review / edit</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -371,49 +428,61 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
               <div
                 key={house.id}
                 onClick={() => setSelectedHouseForDetail(house)}
-                className={`p-4 rounded-2xl border transition-all cursor-pointer group hover:scale-[1.01] ${
+                className={`p-4 rounded-2xl border transition-all cursor-pointer group hover:border-emerald-500/40 ${
                   hasReport
-                    ? 'border-[var(--card-border)] bg-[var(--card-bg)] hover:border-emerald-500/50'
-                    : 'border-amber-500/30 bg-amber-500/5 hover:border-amber-500/60'
+                    ? 'border-[var(--card-border)] bg-[var(--card-bg)]'
+                    : 'border-amber-500/20 bg-amber-500/5'
                 }`}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="text-[10px] font-mono text-[var(--text-subtle)] uppercase">
-                      {house.category} &bull; {house.assignedHouseparent}
+                    <div className="text-[11px] text-[var(--text-muted)]">
+                      {house.assignedHouseparent}
                     </div>
-                    <h3 className="text-base font-bold text-[var(--text-page)] group-hover:text-emerald-400 transition-colors">
+                    <h3 className="text-sm font-bold text-[var(--text-page)] group-hover:text-emerald-500 transition-colors mt-0.5">
                       {house.name}
                     </h3>
                   </div>
 
-                  {hasReport ? (
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      <span>Received</span>
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" />
-                      <span>Missing</span>
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {hasReport ? (
+                      <span className="text-xs font-medium text-emerald-500">
+                        Received
+                      </span>
+                    ) : (
+                      <span className="text-xs font-medium text-amber-500">
+                        Missing
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenWhatsAppModal(house.id, selectedDate);
+                      }}
+                      title="Send WhatsApp for this house"
+                      className="p-1 rounded-md text-[var(--text-muted)] hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer transition-colors"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-3 flex items-baseline justify-between">
-                  <div className="text-xl font-black text-[var(--text-page)]">
-                    {reported} <span className="text-xs font-mono font-normal text-[var(--text-muted)]">/ {expected}</span>
+                  <div className="text-lg font-bold text-[var(--text-page)]">
+                    {reported} <span className="text-xs font-normal text-[var(--text-muted)]">/ {expected}</span>
                   </div>
-                  <div className="text-xs font-mono">
+                  <div className="text-xs">
                     {notReported > 0 ? (
-                      <span className="text-amber-400 font-bold">{notReported} not reported</span>
+                      <span className="text-amber-500 font-medium">{notReported} not reported</span>
                     ) : (
-                      <span className="text-emerald-400 font-bold">100% full</span>
+                      <span className="text-emerald-500 font-medium">100% full</span>
                     )}
                   </div>
                 </div>
 
-                {/* Progress bar */}
+                {/* Slim Progress bar */}
                 <div className="w-full h-1.5 rounded-full bg-[var(--card-bg-elevated)] overflow-hidden mt-2">
                   <div
                     className={`h-full rounded-full transition-all ${
@@ -424,8 +493,8 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
                 </div>
 
                 {report?.notReportedDetails && (
-                  <div className="mt-2 text-[11px] text-amber-300/90 font-mono truncate bg-amber-500/10 px-2 py-1 rounded-lg">
-                    ⚠️ {report.notReportedDetails}
+                  <div className="mt-2 text-[11px] text-amber-400/90 truncate bg-amber-500/10 px-2 py-1 rounded-lg">
+                    {report.notReportedDetails}
                   </div>
                 )}
               </div>
@@ -436,9 +505,9 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
 
       {/* 8 HOUSES GRID: GIRLS (4) */}
       <div className="space-y-3 pt-2">
-        <div className="flex items-center justify-between text-xs font-mono font-bold uppercase tracking-wider text-pink-400">
+        <div className="flex items-center justify-between text-xs font-semibold text-[var(--text-muted)]">
           <span>Girls Houses (4)</span>
-          <span className="text-[var(--text-subtle)] font-normal">Tap any house for details / correction</span>
+          <span className="text-[11px] font-normal">Tap card to review / edit</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -454,49 +523,61 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
               <div
                 key={house.id}
                 onClick={() => setSelectedHouseForDetail(house)}
-                className={`p-4 rounded-2xl border transition-all cursor-pointer group hover:scale-[1.01] ${
+                className={`p-4 rounded-2xl border transition-all cursor-pointer group hover:border-emerald-500/40 ${
                   hasReport
-                    ? 'border-[var(--card-border)] bg-[var(--card-bg)] hover:border-emerald-500/50'
-                    : 'border-amber-500/30 bg-amber-500/5 hover:border-amber-500/60'
+                    ? 'border-[var(--card-border)] bg-[var(--card-bg)]'
+                    : 'border-amber-500/20 bg-amber-500/5'
                 }`}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="text-[10px] font-mono text-[var(--text-subtle)] uppercase">
-                      {house.category} &bull; {house.assignedHouseparent}
+                    <div className="text-[11px] text-[var(--text-muted)]">
+                      {house.assignedHouseparent}
                     </div>
-                    <h3 className="text-base font-bold text-[var(--text-page)] group-hover:text-emerald-400 transition-colors">
+                    <h3 className="text-sm font-bold text-[var(--text-page)] group-hover:text-emerald-500 transition-colors mt-0.5">
                       {house.name}
                     </h3>
                   </div>
 
-                  {hasReport ? (
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      <span>Received</span>
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" />
-                      <span>Missing</span>
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {hasReport ? (
+                      <span className="text-xs font-medium text-emerald-500">
+                        Received
+                      </span>
+                    ) : (
+                      <span className="text-xs font-medium text-amber-500">
+                        Missing
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenWhatsAppModal(house.id, selectedDate);
+                      }}
+                      title="Send WhatsApp for this house"
+                      className="p-1 rounded-md text-[var(--text-muted)] hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer transition-colors"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-3 flex items-baseline justify-between">
-                  <div className="text-xl font-black text-[var(--text-page)]">
-                    {reported} <span className="text-xs font-mono font-normal text-[var(--text-muted)]">/ {expected}</span>
+                  <div className="text-lg font-bold text-[var(--text-page)]">
+                    {reported} <span className="text-xs font-normal text-[var(--text-muted)]">/ {expected}</span>
                   </div>
-                  <div className="text-xs font-mono">
+                  <div className="text-xs">
                     {notReported > 0 ? (
-                      <span className="text-amber-400 font-bold">{notReported} not reported</span>
+                      <span className="text-amber-500 font-medium">{notReported} not reported</span>
                     ) : (
-                      <span className="text-emerald-400 font-bold">100% full</span>
+                      <span className="text-emerald-500 font-medium">100% full</span>
                     )}
                   </div>
                 </div>
 
-                {/* Progress bar */}
+                {/* Slim Progress bar */}
                 <div className="w-full h-1.5 rounded-full bg-[var(--card-bg-elevated)] overflow-hidden mt-2">
                   <div
                     className={`h-full rounded-full transition-all ${
@@ -507,8 +588,8 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
                 </div>
 
                 {report?.notReportedDetails && (
-                  <div className="mt-2 text-[11px] text-amber-300/90 font-mono truncate bg-amber-500/10 px-2 py-1 rounded-lg">
-                    ⚠️ {report.notReportedDetails}
+                  <div className="mt-2 text-[11px] text-amber-400/90 truncate bg-amber-500/10 px-2 py-1 rounded-lg">
+                    {report.notReportedDetails}
                   </div>
                 )}
               </div>
@@ -518,67 +599,57 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
       </div>
 
       {/* FOLLOW-UP REQUIRED AGGREGATION LIST */}
-      <div className="p-5 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-[var(--card-border-subtle)] pb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-[var(--text-page)]">
+      {followUpItems.length > 0 && (
+        <div className="p-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-[var(--card-border-subtle)] pb-2.5">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <h3 className="text-sm font-semibold text-[var(--text-page)]">
                 Students Requiring Follow-Up ({followUpItems.length})
               </h3>
-              <p className="text-[10px] font-mono text-[var(--text-muted)]">
-                Aggregated issues submitted by houseparents for {selectedDate}
-              </p>
+            </div>
+
+            {/* Filter dropdown */}
+            <div className="flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+              <select
+                value={followUpFilterHouse}
+                onChange={e => setFollowUpFilterHouse(e.target.value)}
+                className="text-xs rounded-lg px-2.5 py-1 border border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-[var(--text-page)] focus:outline-none"
+              >
+                <option value="all">All Houses</option>
+                {houses.map(h => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Filter dropdown */}
-          <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-            <select
-              value={followUpFilterHouse}
-              onChange={e => setFollowUpFilterHouse(e.target.value)}
-              className="text-xs font-mono rounded-xl px-2.5 py-1.5 border border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-[var(--text-page)] focus:outline-none"
-            >
-              <option value="all">All Houses</option>
-              {houses.map(h => (
-                <option key={h.id} value={h.id}>{h.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {followUpItems.length === 0 ? (
-          <div className="p-6 rounded-2xl border border-[var(--card-border-subtle)] text-center text-xs font-mono text-[var(--text-muted)]">
-            ✅ No follow-up issues recorded for {selectedDate}. All reported students accounted for.
-          </div>
-        ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {followUpItems.map(({ house, report }) => (
               <div
                 key={house.id}
                 onClick={() => setSelectedHouseForDetail(house)}
-                className="p-3.5 rounded-2xl border border-amber-500/20 bg-amber-500/5 hover:border-amber-500/40 cursor-pointer transition-all space-y-1.5"
+                className="p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 hover:border-amber-500/40 cursor-pointer transition-all space-y-1"
               >
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-[var(--text-page)] flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                  <span className="font-semibold text-[var(--text-page)]">
                     {house.name}
                   </span>
-                  <span className="text-[11px] font-mono font-semibold text-amber-400">
-                    {report.notReportedCount} students not reported
+                  <span className="text-[11px] font-medium text-amber-500">
+                    {report.notReportedCount} not reported
                   </span>
                 </div>
-                <p className="text-xs text-[var(--text-muted)] leading-relaxed whitespace-pre-wrap pl-3.5">
-                  {report.notReportedDetails || 'No detailed reason supplied yet.'}
-                </p>
+                {report.notReportedDetails && (
+                  <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                    {report.notReportedDetails}
+                  </p>
+                )}
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* House Detail Modal when any house is tapped */}
       {selectedHouseForDetail && (
@@ -592,6 +663,40 @@ export const HouseReportingTab: React.FC<HouseReportingTabProps> = ({
           onRefreshData={onRefreshData}
         />
       )}
+
+      {/* Universal Real Form Modal for 8 Houses */}
+      <UniversalHouseparentFormModal
+        isOpen={isUniversalFormOpen}
+        onClose={() => setIsUniversalFormOpen(false)}
+        houses={houses}
+        activeTerm={activeTerm}
+        initialHouseId={universalFormHouseId}
+        initialDate={selectedDate}
+        onReportSubmitted={onRefreshData}
+        onOpenWhatsAppShare={(houseId, date) => handleOpenWhatsAppModal(houseId, date)}
+      />
+
+      {/* WhatsApp Share & Send Modal (House + Date Selection) */}
+      <WhatsAppShareModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        houses={houses}
+        reports={reports}
+        activeTerm={activeTerm}
+        settings={settings}
+        initialHouseId={whatsAppModalHouseId}
+        initialDate={selectedDate}
+      />
+
+      {/* Official Tally House Arrival Form Link Modal */}
+      <SendFormLinkModal
+        isOpen={isSendFormLinkOpen}
+        onClose={() => setIsSendFormLinkOpen(false)}
+        houses={houses}
+        activeTerm={activeTerm}
+        selectedDate={selectedDate}
+        settings={settings}
+      />
     </div>
   );
 };

@@ -1,6 +1,6 @@
 {
-  "name": "Remix Xtreme🔥",
-  "description": "Xtreme's operational assistant",
+  "name": "Xtreme",
+  "description": "Xtreme Attendance and Duty Operations",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

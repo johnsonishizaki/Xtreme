@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header, type ActiveNavTab } from './components/Header';
 import { HomeScreen } from './components/HomeScreen';
 import { useAuth } from './services/auth.tsx';
@@ -22,6 +22,7 @@ import {
   getHouses,
   getTerms,
   getHouseReports,
+  subscribeToHouseReports,
   saveRosterWithAssignments,
   saveSettings,
   deleteRoster,
@@ -33,23 +34,16 @@ import {
   getCachedTerms
 } from './services/firebase';
 import {
-  SAMPLE_ASSIGNMENTS,
-  SAMPLE_ROSTER,
-  SAMPLE_ROSTER_ID
-} from './services/sampleData';
-import {
   hasReminderTimePassed,
   isTodayReminderDay,
   sendLocalNotification
 } from './services/notificationService';
 import { buildGoogleSheetCsvUrl } from './services/sheetsParser';
-
-// LAZY LOAD HEAVY SECONDARY TABS & MODALS
-const DutyTab = React.lazy(() => import('./components/DutyTab').then(m => ({ default: m.DutyTab })));
-const HouseReportingTab = React.lazy(() => import('./components/HouseReportingTab').then(m => ({ default: m.HouseReportingTab })));
-const HistoryTab = React.lazy(() => import('./components/HistoryTab').then(m => ({ default: m.HistoryTab })));
-const SettingsTab = React.lazy(() => import('./components/SettingsTab').then(m => ({ default: m.SettingsTab })));
-const ReviewDataModal = React.lazy(() => import('./components/ReviewDataModal').then(m => ({ default: m.ReviewDataModal })));
+import { DutyTab } from './components/DutyTab';
+import { HouseReportingTab } from './components/HouseReportingTab';
+import { HistoryTab } from './components/HistoryTab';
+import { SettingsTab } from './components/SettingsTab';
+import { ReviewDataModal } from './components/ReviewDataModal';
 
 // Pure, fast hash function to determine if sheet data has significantly changed
 function getSimpleHash(str: string): string {
@@ -65,7 +59,15 @@ function getSimpleHash(str: string): string {
 function MainApp() {
   const { user } = useAuth();
   const { theme, setTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState<ActiveNavTab>('home');
+  const [activeTab, setActiveTab] = useState<ActiveNavTab>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('form') || params.has('report')) {
+        return 'houseReports';
+      }
+    }
+    return 'home';
+  });
 
   // SYNCHRONOUS HYDRATION FROM LOCAL CACHE FOR 0ms INSTANT LOAD
   const [rosters, setRosters] = useState<Roster[]>(() => getCachedRosters());
@@ -80,17 +82,12 @@ function MainApp() {
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
-  // If local cache already has data, NEVER block UI with a loading spinner
-  const [isLoading, setIsLoading] = useState<boolean>(() => {
-    return getCachedRosters().length === 0 && getCachedDutyAssignments().length === 0;
-  });
+  // Zero loading block: never block UI with a loading spinner
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Stale-While-Revalidate: Refresh data in the background without blanking the screen
-  const refreshAllData = useCallback(async (isInitial = false) => {
+  const refreshAllData = useCallback(async () => {
     try {
-      if (isInitial && getCachedRosters().length === 0) {
-        setIsLoading(true);
-      }
       const [
         fetchedSettings,
         fetchedRosters,
@@ -125,10 +122,23 @@ function MainApp() {
       }
     } catch (err) {
       console.warn('Background sync error (serving cache):', err);
-    } finally {
-      setIsLoading(false);
     }
   }, [setTheme]);
+
+  // Purge lingering demo data from localStorage on boot
+  useEffect(() => {
+    try {
+      const storedRosters = localStorage.getItem('xtreme_duty_rosters');
+      if (storedRosters && (storedRosters.includes('sample') || storedRosters.includes('demo'))) {
+        localStorage.removeItem('xtreme_duty_rosters');
+        localStorage.removeItem('xtreme_duty_assignments');
+      }
+      const storedReports = localStorage.getItem('xtreme_house_reports');
+      if (storedReports && (storedReports.includes('2026-10-07') || storedReports.includes('sample'))) {
+        localStorage.removeItem('xtreme_house_reports');
+      }
+    } catch {}
+  }, []);
 
   // Sync data whenever authentication status changes (login / logout)
   useEffect(() => {
@@ -142,6 +152,33 @@ function MainApp() {
         .catch(err => console.warn('Service Worker registration skipped:', err));
     }
   }, [refreshAllData, user]);
+
+  // REAL-TIME FIRESTORE LISTENER & 1-SECOND AUTO-CHECKING FOR INSTANT HOUSE REPORTS
+  useEffect(() => {
+    let isMounted = true;
+    const unsubscribe = subscribeToHouseReports((liveReports) => {
+      if (isMounted) setReports(liveReports);
+    });
+
+    // 1-second recurring auto-check (zero buttons to press, instant sync)
+    const timer = setInterval(async () => {
+      if (!isMounted || document.visibilityState !== 'visible') return;
+      try {
+        const fresh = await getHouseReports();
+        if (isMounted && Array.isArray(fresh)) {
+          setReports(fresh);
+        }
+      } catch (err) {
+        // Silent background check
+      }
+    }, 1000);
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+      clearInterval(timer);
+    };
+  }, []);
 
   // AUTOMATIC WEEKLY DUTY BACKGROUND SYNC
   useEffect(() => {
@@ -271,15 +308,6 @@ function MainApp() {
     }
   };
 
-  // Load harmless demo roster
-  const handleLoadSampleRoster = async () => {
-    await saveRosterWithAssignments(SAMPLE_ROSTER, SAMPLE_ASSIGNMENTS);
-    await refreshAllData();
-    setActiveTab('home');
-    setSuccessToast('✨ Demo duty schedule loaded! Xtreme can now review weekly announcements.');
-    setTimeout(() => setSuccessToast(null), 4000);
-  };
-
   // Delete any loaded roster
   const handleDeleteRoster = async (rosterId: string) => {
     const target = rosters.find(r => r.id === rosterId);
@@ -296,11 +324,6 @@ function MainApp() {
     }
   };
 
-  // Remove demo roster
-  const handleDeleteSampleRoster = async () => {
-    await handleDeleteRoster(SAMPLE_ROSTER_ID);
-  };
-
   // Save settings update
   const handleUpdateSettings = async (newSettings: AppSettings) => {
     setSettings(newSettings);
@@ -314,10 +337,6 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-page)] flex flex-col font-sans relative overflow-x-hidden transition-colors duration-200">
-      {/* Ambient Background Orbs */}
-      <div className="orb orb-1" />
-      <div className="orb orb-2" />
-
       {/* Visual Success Toast */}
       {successToast && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-emerald-500 text-black font-bold text-xs shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -342,12 +361,12 @@ function MainApp() {
       {/* Main Tab Views */}
       <main className="flex-1 overflow-x-hidden relative z-10">
         {isLoading ? (
-          <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center animate-pulse font-black text-lg">
+          <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center animate-pulse font-bold text-sm">
               X
             </div>
-            <p className="text-xs font-mono text-[var(--text-muted)]">
-              Loading Xtreme Duty Assistant...
+            <p className="text-xs text-[var(--text-muted)]">
+              Loading...
             </p>
           </div>
         ) : (
@@ -367,96 +386,65 @@ function MainApp() {
             )}
 
             {activeTab === 'duty' && (
-              <Suspense fallback={
-                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
-                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
-                  Opening Duty Tab...
-                </div>
-              }>
-                <DutyTab
-                  rosters={rosters}
-                  assignments={assignments}
-                  settings={settings}
-                  sendHistory={sendHistory}
-                  onReviewParsedData={data => setReviewData(data)}
-                  onRefreshData={refreshAllData}
-                  onLoadSampleRoster={handleLoadSampleRoster}
-                  onDeleteSampleRoster={handleDeleteSampleRoster}
-                  onDeleteRoster={handleDeleteRoster}
-                />
-              </Suspense>
+              <DutyTab
+                rosters={rosters}
+                assignments={assignments}
+                settings={settings}
+                sendHistory={sendHistory}
+                onReviewParsedData={data => setReviewData(data)}
+                onRefreshData={refreshAllData}
+                onDeleteRoster={handleDeleteRoster}
+              />
             )}
 
             {activeTab === 'houseReports' && (
-              <Suspense fallback={
-                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
-                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
-                  Opening House Reports...
-                </div>
-              }>
-                <HouseReportingTab
-                  houses={houses}
-                  reports={reports}
-                  terms={terms}
-                  onRefreshData={refreshAllData}
-                  onOpenSettings={(section) => {
-                    if (section) setSettingsInitialSection(section);
-                    setActiveTab('settings');
-                  }}
-                />
-              </Suspense>
+              <HouseReportingTab
+                houses={houses}
+                reports={reports}
+                terms={terms}
+                settings={settings}
+                onRefreshData={refreshAllData}
+                onOpenSettings={(section) => {
+                  if (section) setSettingsInitialSection(section);
+                  setActiveTab('settings');
+                }}
+              />
             )}
 
             {activeTab === 'history' && (
-              <Suspense fallback={
-                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
-                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
-                  Opening History...
-                </div>
-              }>
-                <HistoryTab
-                  houses={houses}
-                  reports={reports}
-                  terms={terms}
-                  dutyHistory={sendHistory}
-                />
-              </Suspense>
+              <HistoryTab
+                houses={houses}
+                reports={reports}
+                terms={terms}
+                dutyHistory={sendHistory}
+              />
             )}
 
             {activeTab === 'settings' && (
-              <Suspense fallback={
-                <div className="min-h-[50vh] flex items-center justify-center text-xs font-mono text-[var(--text-muted)]">
-                  <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mr-2" />
-                  Opening Settings...
-                </div>
-              }>
-                <SettingsTab
-                  settings={settings}
-                  houses={houses}
-                  terms={terms}
-                  onRefreshData={refreshAllData}
-                  initialSection={settingsInitialSection}
-                />
-              </Suspense>
+              <SettingsTab
+                settings={settings}
+                houses={houses}
+                terms={terms}
+                onRefreshData={refreshAllData}
+                initialSection={settingsInitialSection}
+              />
             )}
           </>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="px-6 py-4 border-t border-[var(--card-border)] bg-[var(--footer-bg)] backdrop-blur-md flex justify-center items-center font-mono text-[10px] text-[var(--text-subtle)] uppercase tracking-widest relative z-10 transition-colors">
-        <div>&copy; 2026 Xtreme Assistant. Powered by Ishizaki.</div>
+      <footer className="px-6 py-3 border-t border-[var(--card-border)] bg-[var(--footer-bg)] flex justify-center items-center text-[11px] text-[var(--text-muted)] relative z-10 transition-colors">
+        <div>Xtreme Attendance &amp; Duty Operations</div>
       </footer>
 
       {/* Modal: Review Data Before Saving to Database */}
       {reviewData && (
-        <Suspense fallback={null}>
-          <ReviewDataModal
-            parsedData={reviewData}
-            onConfirmSave={handleConfirmSaveRoster}
-            onClose={() => setReviewData(null)}
-          />
-        </Suspense>
+        <ReviewDataModal
+          parsedData={reviewData}
+          onConfirmSave={handleConfirmSaveRoster}
+          onClose={() => setReviewData(null)}
+        />
       )}
     </div>
   );

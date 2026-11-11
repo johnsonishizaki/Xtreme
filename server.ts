@@ -18,6 +18,16 @@ import {
   saveUserSendHistory,
 } from './src/db/queries.ts';
 
+import { tallyService } from './src/server/tallyService.ts';
+import {
+  handleGoogleFormsAttendanceWebhook,
+  getGoogleFormsReceiverStatus
+} from './src/server/googleFormsReceiver.ts';
+import {
+  handleTallyWebhookPost,
+  getTallyWebhookReceiverStatus
+} from './src/server/tallyWebhookReceiver.ts';
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,7 +38,12 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
-  app.use(express.json({ limit: '30mb' }));
+  app.use(express.json({
+    limit: '30mb',
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    }
+  }));
   app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 
   // API endpoint for Gemini roster analysis
@@ -62,6 +77,131 @@ async function startServer() {
     } catch (err: any) {
       console.error('API /api/ai-check error:', err);
       res.status(500).json({ success: false, error: err.message || 'Gemini check failed' });
+    }
+  });
+
+  // --- TALLY OFFICIAL API ENDPOINTS ---
+  app.get('/api/tally/status', (_req, res) => {
+    try {
+      const status = tallyService.getStatus();
+      res.json({ success: true, ...status });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to get Tally status' });
+    }
+  });
+
+  app.post('/api/tally/config', (req, res) => {
+    try {
+      const { apiKey, formId, pollIntervalSeconds, pollIntervalMinutes } = req.body;
+      tallyService.saveConfiguration(apiKey, formId, pollIntervalSeconds, pollIntervalMinutes);
+      res.json({ success: true, status: tallyService.getStatus() });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to update Tally configuration' });
+    }
+  });
+
+  app.post('/api/tally/test-connection', async (_req, res) => {
+    try {
+      const result = await tallyService.testConnection();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ status: 'connection_error', message: err.message || 'Test connection failed' });
+    }
+  });
+
+  app.post('/api/tally/sync', async (req, res) => {
+    try {
+      const trigger = req.body?.trigger === 'automatic' ? 'automatic' : 'manual';
+      const result = await tallyService.syncSubmissions(trigger);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message || 'Sync failed' });
+    }
+  });
+
+  app.get('/api/tally/history', (_req, res) => {
+    try {
+      const history = tallyService.getSyncHistory();
+      res.json({ success: true, history });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/tally/failed-submissions', (_req, res) => {
+    try {
+      const issues = tallyService.getFailedSubmissions();
+      res.json({ success: true, issues });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // --- GOOGLE FORMS ATTENDANCE WEBHOOK RECEIVER ---
+  // Suggested route: POST /api/integrations/google-forms/attendance
+  app.post('/api/integrations/google-forms/attendance', handleGoogleFormsAttendanceWebhook);
+
+  app.get('/api/integrations/google-forms/attendance', (_req, res) => {
+    try {
+      const status = getGoogleFormsReceiverStatus();
+      res.json({ success: true, ...status });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // --- TALLY DIRECT INSTANT WEBHOOK RECEIVER ---
+  app.post('/api/integrations/tally/webhook', handleTallyWebhookPost);
+  app.post('/api/tally/webhook', handleTallyWebhookPost);
+  app.post('/api/webhook/tally', handleTallyWebhookPost);
+  app.post('/api/tally/webhook/attendance', handleTallyWebhookPost);
+
+  const handleTallyWebhookGet = (_req: any, res: any) => {
+    try {
+      const status = getTallyWebhookReceiverStatus();
+      res.json({ success: true, ...status });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  };
+
+  app.get('/api/integrations/tally/webhook', handleTallyWebhookGet);
+  app.get('/api/tally/webhook', handleTallyWebhookGet);
+  app.get('/api/webhook/tally', handleTallyWebhookGet);
+
+  // --- DIRECT FAST ATTENDANCE REPORTS API (Same-Origin, 0ms latency) ---
+  app.get('/api/reports', async (_req, res) => {
+    try {
+      const { collection, getDocs } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const snap = await getDocs(collection(db, 'houseReports'));
+      const reports: any[] = [];
+      snap.forEach(d => {
+        const rep = d.data();
+        if (rep && rep.id && !rep.id.includes('sample') && !rep.id.includes('demo')) {
+          reports.push(rep);
+        }
+      });
+      reports.sort((a, b) => (b.reportingDate || '').localeCompare(a.reportingDate || ''));
+      res.json({ success: true, count: reports.length, reports });
+    } catch (err: any) {
+      console.warn('[Server] /api/reports fetch error:', err);
+      res.status(500).json({ success: false, error: err.message, reports: [] });
+    }
+  });
+
+  app.post('/api/reports', async (req, res) => {
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const report = req.body;
+      if (!report || !report.id || !report.reportingDate || !report.houseId) {
+        return res.status(400).json({ success: false, error: 'Missing required report fields (id, reportingDate, houseId).' });
+      }
+      await setDoc(doc(db, 'houseReports', report.id), report, { merge: true });
+      res.json({ success: true, report });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -218,6 +358,9 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Initialize automatic Tally background scheduler
+  tallyService.startPolling();
 
   app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Xtreme duty server running on port ${PORT}`);

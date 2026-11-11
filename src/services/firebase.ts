@@ -9,7 +9,8 @@ import {
   query,
   orderBy,
   deleteDoc,
-  writeBatch
+  writeBatch,
+  onSnapshot
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -78,31 +79,33 @@ export function getCachedSettings(): AppSettings {
 }
 
 export function getCachedRosters(): Roster[] {
-  if (typeof window === 'undefined') return [SAMPLE_ROSTER];
+  if (typeof window === 'undefined') return [];
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ROSTERS);
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return Array.from(new Map(parsed.map((r: Roster) => [r.id, r])).values());
+        const real = parsed.filter((r: Roster) => !r.id.includes('sample') && !r.id.includes('demo'));
+        return Array.from(new Map(real.map((r: Roster) => [r.id, r])).values());
       }
     }
   } catch {}
-  return [SAMPLE_ROSTER];
+  return [];
 }
 
 export function getCachedDutyAssignments(): DutyAssignment[] {
-  if (typeof window === 'undefined') return SAMPLE_ASSIGNMENTS;
+  if (typeof window === 'undefined') return [];
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS);
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return Array.from(new Map(parsed.map((a: DutyAssignment) => [a.id, a])).values());
+        const real = parsed.filter((a: DutyAssignment) => !a.id.includes('sample') && !a.rosterId.includes('sample'));
+        return Array.from(new Map(real.map((a: DutyAssignment) => [a.id, a])).values());
       }
     }
   } catch {}
-  return SAMPLE_ASSIGNMENTS;
+  return [];
 }
 
 export function getCachedSendHistory(): SendHistory[] {
@@ -123,34 +126,42 @@ export function getCachedHouses(): HouseConfig[] {
     const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.HOUSES);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length === 8) {
+        const validNames = new Set(DEFAULT_HOUSES.map(h => h.name));
+        if (parsed.every((h: HouseConfig) => validNames.has(h.name))) {
+          return parsed;
+        }
+      }
     }
   } catch {}
+  localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSES, JSON.stringify(DEFAULT_HOUSES));
   return DEFAULT_HOUSES;
 }
 
 export function getCachedTerms(): AcademicTerm[] {
-  if (typeof window === 'undefined') return [DEFAULT_TERM];
+  if (typeof window === 'undefined') return [];
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.TERMS);
-    if (cached) {
+    if (cached !== null) {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
   return [DEFAULT_TERM];
 }
 
 export function getCachedHouseReports(): HouseDailyReport[] {
-  if (typeof window === 'undefined') return SAMPLE_HOUSE_REPORTS;
+  if (typeof window === 'undefined') return [];
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.HOUSE_REPORTS);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter((r: HouseDailyReport) => !r.id.includes('demo') && !r.id.includes('sample') && r.reportingDate !== '2026-10-07' && r.reportingDate !== '2026-10-08');
+      }
     }
   } catch {}
-  return SAMPLE_HOUSE_REPORTS;
+  return [];
 }
 
 // Bounded timeout helper
@@ -221,6 +232,12 @@ export async function getHouses(): Promise<HouseConfig[]> {
     const houses: HouseConfig[] = [];
     snap.forEach(d => houses.push(d.data() as HouseConfig));
     if (houses.length > 0) {
+      const validNames = new Set(DEFAULT_HOUSES.map(h => h.name));
+      const allValid = houses.length === 8 && houses.every(h => validNames.has(h.name));
+      if (!allValid) {
+        await saveHouses(DEFAULT_HOUSES);
+        return DEFAULT_HOUSES;
+      }
       houses.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
       localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSES, JSON.stringify(houses));
       return houses;
@@ -262,15 +279,14 @@ export async function getTerms(): Promise<AcademicTerm[]> {
     const q = query(colRef, orderBy('createdAt', 'desc'));
     const snap = await withTimeout(getDocs(q), 2500);
     const terms: AcademicTerm[] = [];
-    snap.forEach(d => terms.push(d.data() as AcademicTerm));
-    if (terms.length > 0) {
-      localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify(terms));
-      return terms;
-    }
-    await saveTerm(DEFAULT_TERM);
-    return [DEFAULT_TERM];
+    snap.forEach(d => {
+      const t = d.data() as AcademicTerm;
+      terms.push({ ...t, status: 'open' });
+    });
+    localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify(terms));
+    return terms;
   } catch (err) {
-    return getCachedTerms();
+    return getCachedTerms().map(t => ({ ...t, status: 'open' }));
   }
 }
 
@@ -299,28 +315,80 @@ export async function setTermStatus(termId: string, status: 'open' | 'closed'): 
   await saveTerm(updated);
 }
 
+// Delete academic term
+export async function deleteTerm(termId: string): Promise<void> {
+  const current = getCachedTerms();
+  const updatedList = current.filter(t => t.id !== termId);
+  localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify(updatedList));
+
+  try {
+    await deleteDoc(doc(db, 'terms', termId));
+  } catch (err) {
+    console.warn('Firestore deleteTerm fallback to local storage:', err);
+  }
+}
+
 // ==========================================
 // 4. HOUSE DAILY REPORTING & COLLATION
 // ==========================================
 
 export async function getHouseReports(): Promise<HouseDailyReport[]> {
+  // 1. Try same-origin backend API first (instant, bypasses browser iframe sandbox issues)
+  try {
+    const res = await fetch('/api/reports');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.reports)) {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSE_REPORTS, JSON.stringify(data.reports));
+        return data.reports;
+      }
+    }
+  } catch (err) {
+    // Continue to Firestore SDK fallback
+  }
+
+  // 2. Direct Firestore SDK
+  try {
+    const colRef = collection(db, 'houseReports');
+    const snap = await withTimeout(getDocs(colRef), 6000);
+    const reports: HouseDailyReport[] = [];
+    snap.forEach(d => {
+      const rep = d.data() as HouseDailyReport;
+      if (rep && rep.id && !rep.id.includes('sample') && !rep.id.includes('demo') && rep.reportingDate !== '2026-10-07' && rep.reportingDate !== '2026-10-08') {
+        reports.push(rep);
+      }
+    });
+    reports.sort((a, b) => (b.reportingDate || '').localeCompare(a.reportingDate || ''));
+    localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSE_REPORTS, JSON.stringify(reports));
+    return reports;
+  } catch (err) {
+    return getCachedHouseReports();
+  }
+}
+
+/**
+ * Subscribes to real-time house reports updates from Firestore.
+ */
+export function subscribeToHouseReports(callback: (reports: HouseDailyReport[]) => void): () => void {
   try {
     const colRef = collection(db, 'houseReports');
     const q = query(colRef, orderBy('reportingDate', 'desc'));
-    const snap = await withTimeout(getDocs(q), 2500);
-    const reports: HouseDailyReport[] = [];
-    snap.forEach(d => reports.push(d.data() as HouseDailyReport));
-    if (reports.length > 0) {
+    return onSnapshot(q, (snap) => {
+      const reports: HouseDailyReport[] = [];
+      snap.forEach(d => {
+        const rep = d.data() as HouseDailyReport;
+        if (rep && rep.id && !rep.id.includes('sample') && !rep.id.includes('demo')) {
+          reports.push(rep);
+        }
+      });
       localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSE_REPORTS, JSON.stringify(reports));
-      return reports;
-    }
-    // Seed initial reports if empty
-    for (const rep of SAMPLE_HOUSE_REPORTS) {
-      await saveHouseReport(rep);
-    }
-    return SAMPLE_HOUSE_REPORTS;
+      callback(reports);
+    }, (err) => {
+      console.warn('Firestore onSnapshot houseReports error:', err);
+    });
   } catch (err) {
-    return getCachedHouseReports();
+    console.warn('Could not subscribe to houseReports:', err);
+    return () => {};
   }
 }
 
@@ -332,10 +400,6 @@ export async function saveHouseReport(report: HouseDailyReport): Promise<void> {
   // Validate numbers
   const expected = Math.max(0, Number(report.expectedCount) || 0);
   let reported = Math.max(0, Number(report.reportedCount) || 0);
-
-  if (reported > expected) {
-    throw new Error(`Reported count (${reported}) cannot exceed expected student count (${expected}).`);
-  }
 
   const notReported = Math.max(0, expected - reported);
 
@@ -370,10 +434,10 @@ export function collateDailyReports(
   reports: HouseDailyReport[],
   houses: HouseConfig[],
   reportingDate: string,
-  termId: string
+  termId: string = ''
 ): DailyCollation {
   const activeHouses = houses.filter(h => h.active);
-  const dateReports = reports.filter(r => r.reportingDate === reportingDate && r.termId === termId);
+  const dateReports = reports.filter(r => r.reportingDate === reportingDate);
 
   let totalExpected = 0;
   let totalReported = 0;
@@ -449,13 +513,15 @@ export async function getRosters(): Promise<Roster[]> {
     const q = query(rostersCol, orderBy('uploadedAt', 'desc'));
     const snap = await withTimeout(getDocs(q), 2500);
     const rosters: Roster[] = [];
-    snap.forEach(d => rosters.push(d.data() as Roster));
-    if (rosters.length > 0) {
-      const unique = Array.from(new Map(rosters.map(r => [r.id, r])).values());
-      localStorage.setItem(LOCAL_STORAGE_KEYS.ROSTERS, JSON.stringify(unique));
-      return unique;
-    }
-    return getCachedRosters();
+    snap.forEach(d => {
+      const r = d.data() as Roster;
+      if (!r.id.includes('sample') && !r.id.includes('demo')) {
+        rosters.push(r);
+      }
+    });
+    const unique = Array.from(new Map(rosters.map(r => [r.id, r])).values());
+    localStorage.setItem(LOCAL_STORAGE_KEYS.ROSTERS, JSON.stringify(unique));
+    return unique;
   } catch (err) {
     return getCachedRosters();
   }
@@ -547,13 +613,15 @@ export async function getDutyAssignments(): Promise<DutyAssignment[]> {
     const q = query(assignCol, orderBy('startDate', 'asc'));
     const snap = await withTimeout(getDocs(q), 2500);
     const assignments: DutyAssignment[] = [];
-    snap.forEach(d => assignments.push(d.data() as DutyAssignment));
-    if (assignments.length > 0) {
-      const unique = Array.from(new Map(assignments.map(a => [a.id, a])).values());
-      localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(unique));
-      return unique;
-    }
-    return getCachedDutyAssignments();
+    snap.forEach(d => {
+      const a = d.data() as DutyAssignment;
+      if (!a.id.includes('sample') && !a.rosterId.includes('sample')) {
+        assignments.push(a);
+      }
+    });
+    const unique = Array.from(new Map(assignments.map(a => [a.id, a])).values());
+    localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(unique));
+    return unique;
   } catch (err) {
     return getCachedDutyAssignments();
   }
@@ -608,24 +676,8 @@ export async function recordSendHistory(item: SendHistory): Promise<void> {
 // ==========================================
 
 export async function loadAllDemoData(): Promise<void> {
-  localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSES, JSON.stringify(DEFAULT_HOUSES));
-  localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify([DEFAULT_TERM]));
-  localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSE_REPORTS, JSON.stringify(SAMPLE_HOUSE_REPORTS));
-  localStorage.setItem(LOCAL_STORAGE_KEYS.ROSTERS, JSON.stringify([SAMPLE_ROSTER]));
-  localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(SAMPLE_ASSIGNMENTS));
-  localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
-
-  try {
-    await saveHouses(DEFAULT_HOUSES);
-    await saveTerm(DEFAULT_TERM);
-    for (const r of SAMPLE_HOUSE_REPORTS) {
-      await saveHouseReport(r);
-    }
-    await saveRosterWithAssignments(SAMPLE_ROSTER, SAMPLE_ASSIGNMENTS);
-    await saveSettings(DEFAULT_SETTINGS);
-  } catch (err) {
-    console.warn('Demo data loaded into local cache:', err);
-  }
+  // Purged to satisfy request to remove demo data
+  await clearAllDemoData();
 }
 
 export async function clearAllDemoData(): Promise<void> {
@@ -633,5 +685,30 @@ export async function clearAllDemoData(): Promise<void> {
   localStorage.removeItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS);
   localStorage.removeItem(LOCAL_STORAGE_KEYS.ROSTERS);
   localStorage.removeItem(LOCAL_STORAGE_KEYS.HISTORY);
-  // Keep houses and settings structure initialized
+  try {
+    const batch = writeBatch(db);
+    const [reportsSnap, assignSnap, rostersSnap] = await Promise.all([
+      getDocs(collection(db, 'houseReports')),
+      getDocs(collection(db, 'dutyAssignments')),
+      getDocs(collection(db, 'rosters'))
+    ]);
+    reportsSnap.forEach(d => {
+      if (d.id.includes('2026-10-07') || d.id.includes('2026-10-08') || d.id.includes('sample') || d.id.includes('demo')) {
+        batch.delete(d.ref);
+      }
+    });
+    assignSnap.forEach(d => {
+      if (d.id.includes('sample') || d.id.includes('demo')) {
+        batch.delete(d.ref);
+      }
+    });
+    rostersSnap.forEach(d => {
+      if (d.id.includes('sample') || d.id.includes('demo')) {
+        batch.delete(d.ref);
+      }
+    });
+    await batch.commit();
+  } catch (err) {
+    console.warn('Purge demo documents:', err);
+  }
 }

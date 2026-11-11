@@ -111,30 +111,190 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  * On mobile/iPhone: whatsapp:// protocol triggers native WhatsApp app directly
  * Web fallback: https://api.whatsapp.com/send?text=
  */
-export function openWhatsApp(message: string, behavior: 'app' | 'web' | 'prompt' = 'app'): void {
+/**
+ * Generates WhatsApp launch URL
+ * Supports optional phone number for direct messaging to houseparents or groups
+ * On mobile/iPhone: whatsapp:// protocol triggers native WhatsApp app directly
+ * Web fallback: https://api.whatsapp.com/send?text=
+ */
+export function openWhatsApp(
+  message: string,
+  behavior: 'app' | 'web' | 'prompt' = 'app',
+  phoneNumber?: string
+): void {
   const encoded = encodeURIComponent(message);
-  
+  const cleanPhone = phoneNumber ? phoneNumber.replace(/[^0-9]/g, '') : '';
+  const phoneParam = cleanPhone ? `phone=${cleanPhone}&` : '';
+
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isAndroid = /Android/.test(navigator.userAgent);
 
   if (behavior === 'web') {
-    window.location.href = `https://api.whatsapp.com/send?text=${encoded}`;
+    window.location.href = `https://api.whatsapp.com/send?${phoneParam}text=${encoded}`;
     return;
   }
 
   if (isIOS || isAndroid || behavior === 'app') {
     // Attempt deep link scheme
-    const deepLink = `whatsapp://send?text=${encoded}`;
+    const deepLink = cleanPhone
+      ? `whatsapp://send?phone=${cleanPhone}&text=${encoded}`
+      : `whatsapp://send?text=${encoded}`;
     window.location.href = deepLink;
 
     // Timeout fallback if app isn't installed or doesn't respond
     setTimeout(() => {
-      // If user is still on this screen after 1.5s, offer web link
       console.log('WhatsApp deep link invoked');
     }, 1500);
   } else {
     // Desktop browser default
-    window.location.href = `https://api.whatsapp.com/send?text=${encoded}`;
+    window.location.href = `https://api.whatsapp.com/send?${phoneParam}text=${encoded}`;
   }
 }
+
+/**
+ * Generates WhatsApp message requesting a houseparent to submit their student count
+ */
+export function generateHouseRequestWhatsAppMessage(
+  house: { id: string; name: string; category: string; expectedStudentCount: number; assignedHouseparent: string },
+  dateStr: string,
+  formUrl: string
+): string {
+  const formattedDate = formatDutyDate(dateStr) || dateStr;
+  return `📋 *HOUSEPARENT DAILY REPORT REQUEST*
+🏫 *House:* ${house.name} (${house.category})
+👤 *Houseparent:* ${house.assignedHouseparent}
+📅 *Reporting Date:* ${formattedDate}
+🎯 *Expected Students:* ${house.expectedStudentCount}
+
+Dear Houseparent, please submit your *Number of Students Reporting* for today using this direct form:
+👉 ${formUrl}
+
+*(Only number of students reporting is required. Missing count is calculated automatically).*
+
+Thank you,
+*Senior Houseparent (Xtreme)*`;
+}
+
+/**
+ * Generates WhatsApp message summarizing a single house's report status
+ */
+export function generateHouseStatusWhatsAppMessage(
+  house: { id: string; name: string; category: string; expectedStudentCount: number; assignedHouseparent: string },
+  report: { reportedCount: number; expectedCount?: number; notReportedCount: number; notReportedDetails?: string; updatedAt?: string } | undefined,
+  dateStr: string
+): string {
+  const formattedDate = formatDutyDate(dateStr) || dateStr;
+  const expected = report?.expectedCount ?? house.expectedStudentCount;
+  
+  if (!report) {
+    return `⚠️ *HOUSE REPORT PENDING*
+🏫 *House:* ${house.name} (${house.category})
+👤 *Houseparent:* ${house.assignedHouseparent}
+📅 *Date:* ${formattedDate}
+🎯 *Expected Quota:* ${expected} students
+
+Status: *No report submitted yet for this date.*
+Please submit your student reporting number.
+
+*Senior Houseparent (Xtreme)*`;
+  }
+
+  const reported = report.reportedCount;
+  const notReported = Math.max(0, expected - reported);
+  const percentage = expected > 0 ? ((reported / expected) * 100).toFixed(1) : '0';
+
+  let msg = `📊 *HOUSE REPORT UPDATE*
+🏫 *House:* ${house.name} (${house.category})
+📅 *Date:* ${formattedDate}
+👤 *Houseparent:* ${house.assignedHouseparent}
+
+✅ *Students Reported:* ${reported} / ${expected} (${percentage}%)
+⏳ *Not Yet Reported:* ${notReported}`;
+
+  if (report.notReportedDetails && report.notReportedDetails.trim()) {
+    msg += `\n📝 *Details / Reasons:* ${report.notReportedDetails.trim()}`;
+  }
+
+  msg += `\n\n_Confirmed by Senior Houseparent (Xtreme)_`;
+  return msg;
+}
+
+/**
+ * Generates WhatsApp message for the complete 8-houses collation
+ */
+export function generateFullCollationWhatsAppMessage(
+  collation: {
+    totalExpected: number;
+    totalReported: number;
+    totalNotReported: number;
+    reportingPercentage: number;
+    reportsReceivedCount: number;
+    totalHousesCount: number;
+    boysExpected: number;
+    boysReported: number;
+    boysNotReported: number;
+    boysPercentage: number;
+    girlsExpected: number;
+    girlsReported: number;
+    girlsNotReported: number;
+    girlsPercentage: number;
+    missingHouseIds: string[];
+  },
+  houses: Array<{ id: string; name: string; category: string }>,
+  dateReportsMap: Map<string, { reportedCount: number; notReportedCount: number; expectedCount: number; notReportedDetails?: string }>,
+  dateStr: string
+): string {
+  const formattedDate = formatDutyDate(dateStr) || dateStr;
+
+  let text = `📢 *TERM OPENING SCHOOL REPORT*\n`;
+  text += `📅 *Date:* ${formattedDate}\n\n`;
+
+  text += `📊 *OVERALL TOTALS*\n`;
+  text += `• Total Expected: *${collation.totalExpected}*\n`;
+  text += `• Total Reported: *${collation.totalReported}* (${collation.reportingPercentage}%)\n`;
+  text += `• Not Yet Reported: *${collation.totalNotReported}*\n`;
+  text += `• Reports Received: *${collation.reportsReceivedCount} of ${collation.totalHousesCount} Houses*\n\n`;
+
+  text += `👦 *BOYS HOUSES (4)*: ${collation.boysReported}/${collation.boysExpected} (${collation.boysPercentage}%)\n`;
+  text += `👧 *GIRLS HOUSES (4)*: ${collation.girlsReported}/${collation.girlsExpected} (${collation.girlsPercentage}%)\n\n`;
+
+  text += `🏫 *8 HOUSES BREAKDOWN*\n`;
+  for (const h of houses) {
+    const rep = dateReportsMap.get(h.id);
+    if (rep) {
+      const pct = rep.expectedCount > 0 ? ((rep.reportedCount / rep.expectedCount) * 100).toFixed(0) : 0;
+      text += `✅ *${h.name}*: ${rep.reportedCount}/${rep.expectedCount} (${pct}%)`;
+      if (rep.notReportedCount > 0) {
+        text += ` — ${rep.notReportedCount} absent/pending`;
+      }
+      text += `\n`;
+    } else {
+      text += `⏳ *${h.name}*: Report pending\n`;
+    }
+  }
+
+  if (collation.missingHouseIds.length > 0) {
+    const missingNames = collation.missingHouseIds
+      .map(id => houses.find(h => h.id === id)?.name || id)
+      .join(', ');
+    text += `\n⚠️ *Missing Reports:* ${missingNames}\n`;
+  }
+
+  // Follow-up details
+  const followUps: string[] = [];
+  houses.forEach(h => {
+    const rep = dateReportsMap.get(h.id);
+    if (rep && rep.notReportedDetails && rep.notReportedDetails.trim()) {
+      followUps.push(`• *${h.name}:* ${rep.notReportedDetails.trim()}`);
+    }
+  });
+
+  if (followUps.length > 0) {
+    text += `\n📝 *Follow-up Notes:*\n${followUps.join('\n')}\n`;
+  }
+
+  text += `\n_Generated via Xtreme Senior Houseparent Suite_`;
+  return text;
+}
+

@@ -34,23 +34,15 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center justify-between">
           <div
             onClick={() => setActiveTab('home')}
-            className="flex items-center gap-2.5 cursor-pointer group"
+            className="flex items-center gap-2 cursor-pointer group"
           >
-            <div className="w-9 h-9 bg-emerald-500 text-black flex items-center justify-center font-black text-lg rounded-xl shadow-md shrink-0 transition-transform active:scale-95">
-              X
+            <div className="w-7 h-7 bg-emerald-500 text-black flex items-center justify-center font-bold text-xs rounded-lg shrink-0">
+              XT
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <h1 className="text-sm sm:text-base font-black tracking-widest uppercase transition-colors text-[var(--text-page)] group-hover:text-emerald-500">
-                  XTREME
-                </h1>
-                <span className="text-[9px] font-mono font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-emerald-500 text-black">
-                  OPS
-                </span>
+              <div className="text-sm font-bold tracking-tight text-[var(--text-page)]">
+                Xtreme
               </div>
-              <p className="text-[9px] font-mono tracking-wider uppercase text-[var(--text-subtle)]">
-                Senior Houseparent Suite
-              </p>
             </div>
           </div>
 
@@ -61,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={toggleTheme}
               aria-label={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
               title={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
-              className="p-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-page)] hover:border-[var(--card-border-hover)] transition-all active:scale-95 cursor-pointer"
+              className="p-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-page)] hover:border-[var(--card-border-hover)] transition-all cursor-pointer"
             >
               {isLight ? (
                 <Moon className="w-4 h-4 text-emerald-600" />
@@ -72,16 +64,16 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs (5 exact tabs: Home, Duty, House Reports, History, Settings) */}
+        {/* Navigation Tabs */}
         <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto overflow-x-auto scrollbar-thin pb-0.5">
-          <nav className="flex items-center gap-1 p-1 rounded-2xl border border-[var(--card-border)] bg-[var(--nav-bg)] shrink-0">
+          <nav className="flex items-center gap-1 p-1 rounded-xl border border-[var(--card-border)] bg-[var(--nav-bg)] shrink-0">
             {/* 1. Home */}
             <button
               type="button"
               onClick={() => setActiveTab('home')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'home'
-                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  ? 'bg-emerald-500 text-black font-semibold shadow-xs'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
@@ -93,16 +85,16 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('duty')}
-              className={`relative px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              className={`relative px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'duty'
-                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  ? 'bg-emerald-500 text-black font-semibold shadow-xs'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
               <Calendar className="w-3.5 h-3.5" />
               <span>Duty</span>
               {isSundayPending && (
-                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-emerald-400 animate-pulse" />
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-emerald-400 animate-pulse" />
               )}
             </button>
 
@@ -110,16 +102,16 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('houseReports')}
-              className={`relative px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              className={`relative px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'houseReports'
-                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  ? 'bg-emerald-500 text-black font-semibold shadow-xs'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
               <Users className="w-3.5 h-3.5" />
               <span className="whitespace-nowrap">House Reports</span>
               {missingReportsCount > 0 && (
-                <span className="absolute -top-1 -right-1 px-1 py-0.2 text-[8px] font-bold rounded-full bg-amber-400 text-black font-mono">
+                <span className="absolute -top-0.5 -right-0.5 px-1 py-0.2 text-[8px] font-bold rounded-full bg-amber-400 text-black">
                   {missingReportsCount}
                 </span>
               )}
@@ -129,9 +121,9 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('history')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'history'
-                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  ? 'bg-emerald-500 text-black font-semibold shadow-xs'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >
@@ -143,9 +135,9 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('settings')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                 activeTab === 'settings'
-                  ? 'bg-emerald-500 text-black font-extrabold shadow-md'
+                  ? 'bg-emerald-500 text-black font-semibold shadow-xs'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)]'
               }`}
             >

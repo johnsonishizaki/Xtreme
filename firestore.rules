@@ -38,5 +38,17 @@ service cloud.firestore {
     match /notificationSubscriptions/{subId} {
       allow read, write: if true;
     }
+
+    match /tallySubmissions/{submissionId} {
+      allow read, write: if true;
+    }
+
+    match /tallySyncLogs/{logId} {
+      allow read, write: if true;
+    }
+
+    match /googleFormsSubmissions/{submissionId} {
+      allow read, write: if true;
+    }
   }
 }

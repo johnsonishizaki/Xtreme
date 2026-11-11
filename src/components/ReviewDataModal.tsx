@@ -10,8 +10,6 @@ import {
   Loader2
 } from 'lucide-react';
 import { DutyAssignment, ParsedRosterPayload, Roster } from '../types';
-import { OperationProgressModal } from './OperationProgressModal';
-import { useOperationProgress } from '../hooks/useOperationProgress';
 
 interface ReviewDataModalProps {
   parsedData: ParsedRosterPayload;
@@ -30,7 +28,6 @@ export const ReviewDataModal: React.FC<ReviewDataModalProps> = ({
   );
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const opProgress = useOperationProgress();
 
   // Update specific field in an assignment
   const handleFieldChange = (index: number, field: string, value: any) => {
@@ -98,7 +95,7 @@ export const ReviewDataModal: React.FC<ReviewDataModalProps> = ({
     ]);
   };
 
-  // Final confirmation to database with real-time staged progress
+  // Final confirmation to database
   const handleConfirm = async () => {
     if (assignments.length === 0) {
       setErrorMessage('Please have at least one duty assignment before saving.');
@@ -109,19 +106,6 @@ export const ReviewDataModal: React.FC<ReviewDataModalProps> = ({
     setIsSaving(true);
 
     try {
-      opProgress.startOperation(
-        'Saving Duty Schedule to Firestore',
-        [
-          { label: 'Validating assignments & date sequencing', detail: `${assignments.length} duty weeks ready` },
-          { label: 'Writing roster configuration to Firestore', detail: 'Creating roster document' },
-          { label: 'Batch saving duty assignments', detail: `Persisting ${assignments.length} weekly records` },
-          { label: 'Activating schedule for Senior Houseparent', detail: 'Updating active roster' }
-        ],
-        'Writing duty roster and assignments to Cloud Firestore...'
-      );
-
-      opProgress.setStage(0, 'Validating duty weeks...', 20);
-
       const rosterId = `roster-${Date.now()}`;
       const nowIso = new Date().toISOString();
 
@@ -153,17 +137,11 @@ export const ReviewDataModal: React.FC<ReviewDataModalProps> = ({
         updatedAt: nowIso
       }));
 
-      opProgress.setStage(1, 'Connecting to Firestore...', 45);
-      opProgress.setStage(2, `Saving ${finalAssignments.length} duty weeks to Firestore...`, 75);
       await onConfirmSave(newRoster, finalAssignments);
-      opProgress.setStage(3, 'Finalizing activation...', 95);
-      await opProgress.completeOperation(`Roster saved! ${finalAssignments.length} duty weeks active.`, 500);
       onClose();
     } catch (err: any) {
       console.error('[RosterSave:Modal] Error encountered during save:', err);
-      const msg = `Error saving roster: ${err.message || 'Please check your connection and try again.'}`;
-      opProgress.failOperation(msg);
-      setErrorMessage(msg);
+      setErrorMessage(`Error saving roster: ${err.message || 'Please check your connection and try again.'}`);
     } finally {
       setIsSaving(false);
     }
@@ -395,9 +373,6 @@ export const ReviewDataModal: React.FC<ReviewDataModalProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Active Staged Saving Progress Modal */}
-      <OperationProgressModal {...opProgress} onClose={opProgress.close} />
     </div>
   );
 };
