@@ -205,6 +205,54 @@ async function startServer() {
     }
   });
 
+  // --- ACADEMIC TERMS API (Direct same-origin Firestore access) ---
+  app.get('/api/terms', async (_req, res) => {
+    try {
+      const { collection, getDocs } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const snap = await getDocs(collection(db, 'terms'));
+      const terms: any[] = [];
+      snap.forEach(d => {
+        const t = d.data();
+        if (t && t.id) terms.push({ ...t, status: 'open' });
+      });
+      res.json({ success: true, count: terms.length, terms });
+    } catch (err: any) {
+      console.warn('[Server] /api/terms fetch error:', err);
+      res.status(500).json({ success: false, error: err.message, terms: [] });
+    }
+  });
+
+  app.post('/api/terms', async (req, res) => {
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const term = req.body;
+      if (!term || !term.id || !term.termName) {
+        return res.status(400).json({ success: false, error: 'Missing term id or termName' });
+      }
+      await setDoc(doc(db, 'terms', term.id), term, { merge: true });
+      res.json({ success: true, term });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete('/api/terms/:id', async (req, res) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const termId = req.params.id;
+      if (!termId) {
+        return res.status(400).json({ success: false, error: 'Missing term id' });
+      }
+      await deleteDoc(doc(db, 'terms', termId));
+      res.json({ success: true, termId });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // --- DATABASE & AUTH API ENDPOINTS ---
 
   // 1. Sync / register user profile and initialize settings
@@ -344,17 +392,59 @@ async function startServer() {
     }
   });
 
+  // Build/boot version token so installed PWAs and open browser tabs auto-refresh cleanly on updates
+  const BOOT_VERSION = String(Date.now());
+  app.get('/api/version', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.json({ version: BOOT_VERSION });
+  });
+
+  // Explicit anti-caching for service worker and manifest so updates are detected immediately
+  app.get(['/sw.js', '/service-worker.js', '/manifest.webmanifest'], (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
+
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
+    app.use((req, res, next) => {
+      if (req.url === '/' || req.url.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+      next();
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    // Serve hashed assets with long cache
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      maxAge: '1y',
+      immutable: true
+    }));
+    // Serve all other static assets
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.webmanifest')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
+    app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

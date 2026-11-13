@@ -14,7 +14,12 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { HouseConfig, AcademicTerm, AppSettings } from '../types';
-import { openWhatsApp, copyToClipboard, formatDutyDate } from '../services/messageGenerator';
+import {
+  openWhatsApp,
+  copyToClipboard,
+  generateHouseRequestWhatsAppMessage,
+  generateFormBroadcastWhatsAppMessage
+} from '../services/messageGenerator';
 
 interface SendFormLinkModalProps {
   isOpen: boolean;
@@ -55,51 +60,13 @@ export const SendFormLinkModal: React.FC<SendFormLinkModalProps> = ({
     return base;
   }, [tallyFormId, selectedHouse, selectedDate]);
 
-  // Formatted date string
-  const formattedDate = useMemo(() => {
-    return formatDutyDate(selectedDate) || selectedDate;
-  }, [selectedDate]);
-
   // Prepared broadcast or house-specific WhatsApp message
   const preparedMessage = useMemo(() => {
     if (selectedHouse) {
-      return `📋 *OLAG SHS — HOUSE ARRIVAL REPORT*
-🏫 *House:* ${selectedHouse.name} (${selectedHouse.category})
-👤 *Houseparent:* ${selectedHouse.assignedHouseparent}
-📅 *Date:* ${formattedDate}
-🎯 *Quota:* ${selectedHouse.expectedStudentCount} students
-
-Dear Houseparent, please submit your house arrival count for today using this official link:
-👉 ${tallyUrl}
-
-• Enter number of students present
-• Enter new arrivals (if any)
-• Enter reasons/notes for missing students
-
-Submissions sync automatically to the Xtreme administrative dashboard.
-Thank you!
-— *Senior Houseparent (Xtreme)*`;
+      return generateHouseRequestWhatsAppMessage(selectedHouse, selectedDate, tallyUrl);
     }
-
-    return `📋 *OLAG SHS — DAILY HOUSE ATTENDANCE REPORTING*
-📅 *Date:* ${formattedDate}
-
-Dear Teachers and Houseparents,
-Please submit your daily house arrival & attendance count using the official link below:
-
-👉 ${tallyUrl}
-
-*Instructions:*
-1. Select your House (all 8 OLAG SHS houses supported)
-2. Enter the Number of Students Present
-3. Enter New Arrivals (if any)
-4. Add notes or reasons for students not present
-
-All submissions sync automatically to the Xtreme administrative collation dashboard.
-
-Thank you for your prompt submission!
-— *Senior Houseparent (Xtreme)*`;
-  }, [selectedHouse, formattedDate, tallyUrl]);
+    return generateFormBroadcastWhatsAppMessage(selectedDate, tallyUrl);
+  }, [selectedHouse, selectedDate, tallyUrl]);
 
   if (!isOpen) return null;
 
@@ -146,7 +113,7 @@ Thank you for your prompt submission!
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-page)] hover:bg-[var(--card-bg-elevated)] transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -158,10 +125,10 @@ Thank you for your prompt submission!
           <div className="p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] space-y-2">
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-1.5 font-semibold text-[var(--text-page)]">
-                <Radio className="w-3.5 h-3.5 text-emerald-400" />
+                <Radio className="w-3.5 h-3.5 text-emerald-500" />
                 <span>Tally Form: Xtreme | Daily House Report</span>
               </div>
-              <span className="font-mono text-[10px] text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded-md">
+              <span className="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--card-bg)] border border-[var(--card-border)] px-2 py-0.5 rounded-md">
                 ID: {tallyFormId}
               </span>
             </div>
@@ -171,14 +138,14 @@ Thank you for your prompt submission!
                 type="text"
                 readOnly
                 value={tallyUrl}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-emerald-400 font-mono select-all focus:outline-none"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-emerald-500 font-mono select-all focus:outline-none"
               />
               <button
                 type="button"
                 onClick={handleCopyLink}
                 className="py-2 px-3 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] hover:bg-[var(--card-bg-elevated)] text-xs font-semibold text-[var(--text-page)] flex items-center gap-1.5 shrink-0 cursor-pointer transition-all"
               >
-                {copiedLink ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedLink ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copiedLink ? 'Copied' : 'Copy'}</span>
               </button>
 
@@ -186,7 +153,7 @@ Thank you for your prompt submission!
                 href={tallyUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="py-2 px-3 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] hover:bg-[var(--card-bg-elevated)] text-xs font-semibold text-zinc-300 hover:text-white flex items-center gap-1.5 shrink-0 transition-all"
+                className="py-2 px-3 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] hover:bg-[var(--card-bg-elevated)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-page)] flex items-center gap-1.5 shrink-0 transition-all"
                 title="Open Tally form in new tab"
               >
                 <ExternalLink className="w-3.5 h-3.5" />

@@ -3,6 +3,7 @@ import {
   getFirestore,
   doc,
   getDoc,
+  getDocFromServer,
   setDoc,
   collection,
   getDocs,
@@ -32,7 +33,7 @@ import {
   SAMPLE_ASSIGNMENTS
 } from './sampleData';
 
-import { DEFAULT_TEMPLATE } from '../constants/template.ts';
+import { DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE } from '../constants/template.ts';
 export { DEFAULT_TEMPLATE };
 
 
@@ -54,6 +55,12 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)');
 export const auth = getAuth(app);
 
+if (typeof window !== 'undefined') {
+  getDocFromServer(doc(db, 'settings', 'main')).catch(() => {
+    // Offline or restricted preview sandbox falls back seamlessly to same-origin API and localStorage
+  });
+}
+
 // Local storage fallback keys for high resilience offline & 0ms initial render
 export const LOCAL_STORAGE_KEYS = {
   SETTINGS: 'xtreme_duty_settings',
@@ -73,7 +80,13 @@ export function getCachedSettings(): AppSettings {
   if (typeof window === 'undefined') return DEFAULT_SETTINGS;
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SETTINGS);
-    if (cached) return JSON.parse(cached);
+    if (cached) {
+      const parsed = JSON.parse(cached) as AppSettings;
+      if (parsed.messageTemplate === LEGACY_DEFAULT_TEMPLATE) {
+        parsed.messageTemplate = DEFAULT_TEMPLATE;
+      }
+      return parsed;
+    }
   } catch {}
   return DEFAULT_SETTINGS;
 }
@@ -199,6 +212,9 @@ export async function getSettings(): Promise<AppSettings> {
     const snap = await withTimeout(getDoc(docRef), 2500);
     if (snap.exists()) {
       const data = snap.data() as AppSettings;
+      if (data.messageTemplate === LEGACY_DEFAULT_TEMPLATE) {
+        data.messageTemplate = DEFAULT_TEMPLATE;
+      }
       localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(data));
       return data;
     }
@@ -274,6 +290,21 @@ export async function saveHouse(house: HouseConfig): Promise<void> {
 // ==========================================
 
 export async function getTerms(): Promise<AcademicTerm[]> {
+  // 1. Try same-origin backend API first (instant, bypasses browser iframe sandbox issues)
+  try {
+    const res = await fetch('/api/terms');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.terms)) {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify(data.terms));
+        return data.terms;
+      }
+    }
+  } catch (err) {
+    // Continue to Firestore SDK fallback
+  }
+
+  // 2. Direct Firestore SDK
   try {
     const colRef = collection(db, 'terms');
     const q = query(colRef, orderBy('createdAt', 'desc'));
@@ -299,6 +330,15 @@ export async function saveTerm(term: AcademicTerm): Promise<void> {
 
   localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify(updatedList));
 
+  // Try API first
+  try {
+    await fetch('/api/terms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cleanDoc(term))
+    });
+  } catch {}
+
   try {
     await setDoc(doc(db, 'terms', term.id), cleanDoc(term), { merge: true });
   } catch (err) {
@@ -320,6 +360,13 @@ export async function deleteTerm(termId: string): Promise<void> {
   const current = getCachedTerms();
   const updatedList = current.filter(t => t.id !== termId);
   localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify(updatedList));
+
+  // Try same-origin API first
+  try {
+    await fetch(`/api/terms/${encodeURIComponent(termId)}`, {
+      method: 'DELETE'
+    });
+  } catch {}
 
   try {
     await deleteDoc(doc(db, 'terms', termId));
@@ -488,7 +535,7 @@ export function collateDailyReports(
     totalReported,
     totalNotReported,
     reportingPercentage,
-    reportsReceivedCount: dateReports.length,
+    reportsReceivedCount: Math.max(0, activeHouses.length - missingHouseIds.length),
     totalHousesCount: activeHouses.length,
     boysExpected,
     boysReported,

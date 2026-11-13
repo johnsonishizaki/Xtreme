@@ -76,7 +76,7 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
   const dateReportsMap = useMemo(() => {
     const map = new Map<string, HouseDailyReport>();
     for (const r of reports) {
-      if (r.reportingDate === selectedDate && r.termId === activeTerm.id) {
+      if (r.reportingDate === selectedDate) {
         map.set(r.houseId, r);
       }
     }
@@ -105,9 +105,12 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
   // Generate WhatsApp Message text
   const generatedMessage = useMemo(() => {
     if (selectedHouseId === 'all' || !selectedHouse) {
+      const activeOrderedHouses = [...houses]
+        .filter(h => h.active)
+        .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
       return generateFullCollationWhatsAppMessage(
         collation,
-        houses,
+        activeOrderedHouses,
         dateReportsMap,
         selectedDate
       );
@@ -274,7 +277,7 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
           <div className="text-xs text-[var(--text-muted)]">
             Message Preview
           </div>
-          <div className="p-3.5 rounded-xl bg-black/20 border border-[var(--card-border-subtle)] text-xs font-mono whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed text-[var(--text-page)] scrollbar-thin">
+          <div className="p-3.5 rounded-xl bg-[var(--code-bg)] border border-[var(--card-border-subtle)] text-xs font-mono whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed text-[var(--text-page)] scrollbar-thin">
             {generatedMessage}
           </div>
         </div>
