@@ -6,6 +6,7 @@ let cachedAlarmWavUrl: string | null = null;
 let sharedAlarmAudioEl: HTMLAudioElement | null = null;
 let audioUnlockAttached = false;
 let repeatingAlarmTimer: ReturnType<typeof setInterval> | null = null;
+let activeWakeLock: any = null;
 
 export function isIOSDevice(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -21,6 +22,18 @@ export function isStandalonePWA(): boolean {
     window.matchMedia('(display-mode: standalone)').matches ||
     (window.navigator as unknown as { standalone?: boolean }).standalone === true
   );
+}
+
+function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const buffer = new ArrayBuffer(rawData.length);
+  const outputArray = new Uint8Array(buffer);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return buffer;
 }
 
 /**
@@ -41,7 +54,10 @@ function buildUrgentBellWavDataUrl(): string {
 
   writeStr(0, 'RIFF');
   view.setUint32(4, 36 + numSamples * 2, true);
-  writeStr(8, 'WAVE');
+  view.setUint8(8, 'W'.charCodeAt(0));
+  view.setUint8(9, 'A'.charCodeAt(0));
+  view.setUint8(10, 'V'.charCodeAt(0));
+  view.setUint8(11, 'E'.charCodeAt(0));
   writeStr(12, 'fmt ');
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true);
@@ -53,7 +69,6 @@ function buildUrgentBellWavDataUrl(): string {
   writeStr(36, 'data');
   view.setUint32(40, numSamples * 2, true);
 
-  // Triple urgent double-harmonic chimes (880/1318Hz, 987/1480Hz, 1174/1760Hz)
   const pulses = [
     { start: 0.0, end: 0.17, f1: 880, f2: 1318.51 },
     { start: 0.21, end: 0.38, f1: 1046.5, f2: 1567.98 },
@@ -75,7 +90,7 @@ function buildUrgentBellWavDataUrl(): string {
         sample += env * tone;
       }
     }
-    const clamped = Math.max(-0.95, Math.min(0.95, sample * 0.92));
+    const clamped = Math.max(-0.95, Math.min(0.95, sample * 0.94));
     view.setInt16(44 + i * 2, Math.floor(clamped * 32767), true);
   }
 
@@ -121,9 +136,6 @@ function getOrCreateAlarmAudioElement(): HTMLAudioElement | null {
   }
 }
 
-/**
- * Unlocks both Web Audio and HTMLAudioElement on the user's first tap so iPhone alarms ring loudly.
- */
 export function unlockAudioEngine(): void {
   if (typeof window === 'undefined' || audioUnlockAttached) return;
   audioUnlockAttached = true;
@@ -188,6 +200,80 @@ export function getNotificationPermission(): NotificationPermissionState {
   return Notification.permission as NotificationPermissionState;
 }
 
+/**
+ * Registers real background Apple APNs / Web Push subscription with our server
+ */
+export async function subscribeToServerPush(sendWelcome: boolean = false): Promise<boolean> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return false;
+  }
+  if (getNotificationPermission() !== 'granted') {
+    return false;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const keyRes = await fetch('/api/push/vapid-public-key', { cache: 'no-store' });
+      if (!keyRes.ok) return false;
+      const { publicKey } = await keyRes.json();
+      if (!publicKey) return false;
+
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+    }
+
+    const res = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscription: sub.toJSON(),
+        sendWelcome
+      })
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Web Push subscription error:', err);
+    return false;
+  }
+}
+
+export async function syncDutyPushStateToServer(state: {
+  assignmentId: string;
+  weekLabel: string;
+  teachersText: string;
+  dutyPeriod?: string;
+  message?: string;
+  isAlreadySent: boolean;
+  reminderEnabled: boolean;
+  reminderDay: number;
+  reminderTime: string;
+  badgeCount: number;
+}): Promise<void> {
+  try {
+    await fetch('/api/push/sync-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+  } catch {}
+}
+
+export async function triggerServerTestPush(): Promise<boolean> {
+  try {
+    await subscribeToServerPush(false);
+    const res = await fetch('/api/push/test', { method: 'POST' });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Boolean(data?.delivered > 0);
+  } catch {
+    return false;
+  }
+}
+
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return 'unsupported';
@@ -196,6 +282,7 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
     const result = await Notification.requestPermission();
     if (result === 'granted') {
       playUrgentAlarmChime(true);
+      await subscribeToServerPush(true);
     }
     return result as NotificationPermissionState;
   } catch (err) {
@@ -205,13 +292,57 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 /**
- * Maximum-audibility iPhone alert chime combining HTMLAudio WAV playback + dual Web Audio siren tones.
+ * Speaks the overdue duty alert clearly over iPhone speaker
+ */
+export function speakUrgentDutyAlert(text: string): void {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.98;
+    utterance.pitch = 1.05;
+    utterance.volume = 1.0;
+    window.speechSynthesis.speak(utterance);
+  } catch {}
+}
+
+export function stopSpeechAlert(): void {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  try {
+    window.speechSynthesis.cancel();
+  } catch {}
+}
+
+/**
+ * Prevents iPhone screen from auto-dimming/sleeping while active urgent alarm sheet is visible
+ */
+export async function requestAlarmWakeLock(): Promise<void> {
+  if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) return;
+  try {
+    if (!activeWakeLock) {
+      activeWakeLock = await (navigator as any).wakeLock.request('screen');
+      activeWakeLock?.addEventListener?.('release', () => {
+        activeWakeLock = null;
+      });
+    }
+  } catch {}
+}
+
+export async function releaseAlarmWakeLock(): Promise<void> {
+  if (!activeWakeLock) return;
+  try {
+    await activeWakeLock.release();
+  } catch {}
+  activeWakeLock = null;
+}
+
+/**
+ * Maximum-audibility iPhone alert chime combining HTMLAudio WAV playback + dual Web Audio siren tones
  */
 export function playUrgentAlarmChime(forcePlay: boolean = false): void {
   if (typeof window === 'undefined') return;
   if (!forcePlay && isSoundSnoozed()) return;
 
-  // 1. iOS-friendly HTMLAudio WAV chime
   try {
     const audioEl = getOrCreateAlarmAudioElement();
     if (audioEl) {
@@ -221,19 +352,18 @@ export function playUrgentAlarmChime(forcePlay: boolean = false): void {
     }
   } catch {}
 
-  // 2. Crisp dual-oscillator Web Audio harmonics for loud speaker clarity
   try {
     const ctx = getOrCreateAudioContext();
     if (!ctx) return;
 
     const now = ctx.currentTime;
     const tones = [
-      { freq: 880.0, start: 0.0, dur: 0.14, gain: 0.45 },
-      { freq: 1174.66, start: 0.16, dur: 0.14, gain: 0.5 },
-      { freq: 1318.51, start: 0.32, dur: 0.16, gain: 0.52 },
-      { freq: 1760.0, start: 0.5, dur: 0.28, gain: 0.55 },
-      { freq: 1318.51, start: 0.84, dur: 0.14, gain: 0.48 },
-      { freq: 1760.0, start: 1.0, dur: 0.3, gain: 0.55 }
+      { freq: 880.0, start: 0.0, dur: 0.14, gain: 0.48 },
+      { freq: 1174.66, start: 0.16, dur: 0.14, gain: 0.52 },
+      { freq: 1318.51, start: 0.32, dur: 0.16, gain: 0.55 },
+      { freq: 1760.0, start: 0.5, dur: 0.28, gain: 0.58 },
+      { freq: 1318.51, start: 0.84, dur: 0.14, gain: 0.5 },
+      { freq: 1760.0, start: 1.0, dur: 0.3, gain: 0.58 }
     ];
 
     tones.forEach(t => {
@@ -257,22 +387,33 @@ export function playUrgentAlarmChime(forcePlay: boolean = false): void {
       osc.stop(now + t.start + t.dur);
       harmonic.stop(now + t.start + t.dur);
     });
-  } catch {
-    // Requires gesture unlock on strict browsers
-  }
+  } catch {}
 }
 
 export const playNotificationChime = playUrgentAlarmChime;
 
 /**
- * Pulses the alarm chime continuously every intervalMs while an urgent modal is open
+ * Continuously pulses chime + optional voice announcement every intervalMs while modal is open
  */
-export function startRepeatingAlarmSound(intervalMs: number = 7000): void {
+export function startRepeatingAlarmSound(
+  intervalMs: number = 7000,
+  voiceAnnouncement?: string
+): void {
   stopRepeatingAlarmSound();
+  requestAlarmWakeLock();
   playUrgentAlarmChime(false);
+  if (voiceAnnouncement && !isSoundSnoozed()) {
+    setTimeout(() => speakUrgentDutyAlert(voiceAnnouncement), 1150);
+  }
+
+  let tick = 0;
   repeatingAlarmTimer = setInterval(() => {
     if (!isSoundSnoozed() && document.visibilityState === 'visible') {
+      tick++;
       playUrgentAlarmChime(false);
+      if (voiceAnnouncement && tick % 2 === 0) {
+        setTimeout(() => speakUrgentDutyAlert(voiceAnnouncement), 1150);
+      }
     }
   }, intervalMs);
 }
@@ -282,6 +423,8 @@ export function stopRepeatingAlarmSound(): void {
     clearInterval(repeatingAlarmTimer);
     repeatingAlarmTimer = null;
   }
+  stopSpeechAlert();
+  releaseAlarmWakeLock();
   if (sharedAlarmAudioEl && !sharedAlarmAudioEl.paused) {
     try {
       sharedAlarmAudioEl.pause();
@@ -290,9 +433,6 @@ export function stopRepeatingAlarmSound(): void {
   }
 }
 
-/**
- * Sets or clears OS App Icon Badge count on supported mobile (iOS 16.4+ PWA) & desktop PWAs
- */
 export async function syncAppBadge(pendingCount: number): Promise<void> {
   if (typeof navigator === 'undefined') return;
   try {
@@ -305,9 +445,7 @@ export async function syncAppBadge(pendingCount: number): Promise<void> {
     } else if (pendingCount <= 0 && typeof nav.clearAppBadge === 'function') {
       await nav.clearAppBadge();
     }
-  } catch {
-    // Ignore on browsers without Badging API
-  }
+  } catch {}
 }
 
 export type EnhancedNotificationOptions = NotificationOptions & {
@@ -317,9 +455,6 @@ export type EnhancedNotificationOptions = NotificationOptions & {
   actions?: Array<{ action: string; title: string }>;
 };
 
-/**
- * Persistent Push Notification with sound, triple-pulse vibration, renotify, and action buttons
- */
 export async function sendLocalNotification(
   title: string = '⚠️ ACTION REQUIRED: Send Weekly Duty',
   options?: EnhancedNotificationOptions
@@ -377,10 +512,6 @@ export async function sendLocalNotification(
   }
 }
 
-/**
- * Aggressive repeating duty reminder (every 60 seconds while pending, or immediate when forced)
- * until the user marks the week's duty done. Returns true if an alarm pulse occurred.
- */
 export async function checkAndTriggerDutyAlert(
   weekId: string,
   weekLabel: string,
@@ -413,16 +544,17 @@ export async function checkAndTriggerDutyAlert(
   return false;
 }
 
-/**
- * Fires an immediate loud chime + push notification test
- */
 export async function testUrgentNotification(): Promise<boolean> {
   clearSoundSnooze();
   playUrgentAlarmChime(true);
   const perm = await requestNotificationPermission();
+  const serverSent = await triggerServerTestPush();
+  if (serverSent) {
+    return true;
+  }
   if (perm === 'granted') {
     return await sendLocalNotification('🔔 Xtreme iPhone Alert Active', {
-      body: 'Loud chimes, iOS lock-screen push notifications, and flashing banners stay active until marked done.',
+      body: 'Loud chimes, voice alerts, and lock-screen push notifications stay active until marked done.',
       tag: 'xtreme-alert-test',
       requireInteraction: true,
       renotify: true,
@@ -432,10 +564,6 @@ export async function testUrgentNotification(): Promise<boolean> {
   return false;
 }
 
-/**
- * Downloads a repeating weekly .ics Calendar Alarm for iPhone so iOS rings natively on the Lock Screen
- * even when the browser/PWA is completely closed.
- */
 export function downloadDutyCalendarAlarm(
   reminderDay: number = 0,
   reminderTime: string = '08:00',
@@ -448,7 +576,6 @@ export function downloadDutyCalendarAlarm(
   const hh = Math.max(0, Math.min(23, parseInt(hhStr, 10) || 8));
   const mm = Math.max(0, Math.min(59, parseInt(mmStr, 10) || 0));
 
-  // Find next upcoming occurrence of reminderDay
   const now = new Date();
   const next = new Date(now);
   const diff = (reminderDay - now.getDay() + 7) % 7;

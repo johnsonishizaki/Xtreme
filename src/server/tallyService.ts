@@ -25,6 +25,7 @@ import {
   TallyValidationIssue
 } from '../types/tally.ts';
 import { processTallyApiResponse } from '../services/tallyParser.ts';
+import { pushService } from './pushService.ts';
 
 const TALLY_API_BASE = 'https://api.tally.so';
 const DEFAULT_FORM_ID = '2jBVWA';
@@ -358,6 +359,12 @@ class TallyIntegrationService {
       for (const report of validReports) {
         await this.persistHouseReportToDb(report);
         newlyImportedCount++;
+
+        pushService.sendHouseReportArrivalPush(
+          report.houseName,
+          report.reportedCount,
+          report.expectedCount
+        ).catch(() => {});
 
         // Audit entry
         await this.persistSubmissionAudit({

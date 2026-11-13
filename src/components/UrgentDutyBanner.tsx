@@ -83,7 +83,10 @@ export const UrgentDutyBanner: React.FC<UrgentDutyBannerProps> = ({
     }
 
     if (!isSoundSnoozed()) {
-      startRepeatingAlarmSound(7000);
+      const teachersSpeech =
+        featuredAssignment.teachers.map(t => t.name).join(' and ') || 'assigned teachers';
+      const voiceMsg = `Attention. Weekly teacher duty for ${featuredAssignment.weekLabel} has not been sent. Teachers on duty: ${teachersSpeech}.`;
+      startRepeatingAlarmSound(7000, voiceMsg);
     }
 
     return () => {
@@ -236,7 +239,7 @@ export const UrgentDutyBanner: React.FC<UrgentDutyBannerProps> = ({
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-end sm:items-center justify-center p-3 sm:p-4 pb-[calc(env(safe-area-inset-bottom,0px)+12px)]"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs animate-strobe-frame flex items-end sm:items-center justify-center p-3 sm:p-4 pb-[calc(env(safe-area-inset-bottom,0px)+12px)]"
         >
           <div className="w-full max-w-md rounded-2xl border-2 border-amber-500 bg-[var(--modal-bg)] text-[var(--text-page)] p-5 space-y-4 animate-urgent-glow text-left">
             <div className="flex items-start justify-between gap-3">

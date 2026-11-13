@@ -27,6 +27,7 @@ import {
   handleTallyWebhookPost,
   getTallyWebhookReceiverStatus
 } from './src/server/tallyWebhookReceiver.ts';
+import { pushService } from './src/server/pushService.ts';
 
 dotenv.config();
 
@@ -392,6 +393,71 @@ async function startServer() {
     }
   });
 
+  // --- WEB PUSH (REAL iPHONE APNs BACKGROUND LOCK-SCREEN PUSH) ---
+  app.get('/api/push/vapid-public-key', (_req, res) => {
+    try {
+      res.json({ success: true, publicKey: pushService.getPublicKey() });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/push/subscribe', async (req, res) => {
+    try {
+      const { subscription, sendWelcome } = req.body || {};
+      if (!subscription || !subscription.endpoint) {
+        return res.status(400).json({ success: false, error: 'Missing push subscription object' });
+      }
+      const result = await pushService.registerSubscription(
+        subscription,
+        req.headers['user-agent'],
+        Boolean(sendWelcome)
+      );
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/push/unsubscribe', async (req, res) => {
+    try {
+      const { endpoint } = req.body || {};
+      if (endpoint) {
+        await pushService.removeSubscription(endpoint);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/push/sync-state', async (req, res) => {
+    try {
+      const state = await pushService.syncDutyState(req.body || {});
+      res.json({ success: true, state });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/push/mark-done', async (_req, res) => {
+    try {
+      const result = await pushService.markDutyDoneFromPush();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/push/test', async (_req, res) => {
+    try {
+      const result = await pushService.sendTestDutyPush();
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // Build/boot version token so installed PWAs and open browser tabs auto-refresh cleanly on updates
   const BOOT_VERSION = String(Date.now());
   app.get('/api/version', (_req, res) => {
@@ -449,8 +515,9 @@ async function startServer() {
     });
   }
 
-  // Initialize automatic Tally background scheduler
+  // Initialize automatic Tally background scheduler & iPhone Push Watchdog
   tallyService.startPolling();
+  pushService.startScheduler();
 
   app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Xtreme duty server running on port ${PORT}`);

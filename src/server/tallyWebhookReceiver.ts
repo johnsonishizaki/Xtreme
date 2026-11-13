@@ -14,6 +14,7 @@ import { DEFAULT_HOUSES, DEFAULT_TERM } from '../services/sampleData.ts';
 import { HouseConfig, AcademicTerm, HouseDailyReport } from '../types/index.ts';
 import { verifyTallyWebhookSignature } from '../services/tallySignature.ts';
 import { parseTallyWebhookPayload } from '../services/tallyWebhookParser.ts';
+import { pushService } from './pushService.ts';
 
 // Server-side Firestore initialization
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig as any);
@@ -237,6 +238,12 @@ export async function handleTallyWebhookPost(req: Request, res: Response): Promi
   // 6. Atomic Firestore Commit
   try {
     await persistTallyWebhookSubmission(parsed.report, parsed.submissionId, isCorrection);
+
+    pushService.sendHouseReportArrivalPush(
+      parsed.report.houseName,
+      parsed.report.reportedCount,
+      parsed.report.expectedCount
+    ).catch(() => {});
 
     console.info(
       `[TallyWebhook] Successfully synchronized: reportId=${parsed.report.id}, house="${parsed.report.houseName}", date=${parsed.report.reportingDate}, present=${parsed.report.reportedCount}/${parsed.report.expectedCount}, isCorrection=${isCorrection}`

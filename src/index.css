@@ -142,3 +142,16 @@ html.dark {
   animation: urgent-bar-flash 1.6s ease-in-out infinite;
 }
 
+@keyframes strobe-viewport-frame {
+  0%, 100% {
+    box-shadow: inset 0 0 0 4px rgba(245, 158, 11, 0.85);
+  }
+  50% {
+    box-shadow: inset 0 0 0 6px rgba(239, 68, 68, 0.95);
+  }
+}
+
+.animate-strobe-frame {
+  animation: strobe-viewport-frame 0.9s ease-in-out infinite;
+}
+

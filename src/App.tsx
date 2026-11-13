@@ -41,7 +41,9 @@ import {
   syncAppBadge,
   clearSoundSnooze,
   stopRepeatingAlarmSound,
-  isSoundSnoozed
+  isSoundSnoozed,
+  subscribeToServerPush,
+  syncDutyPushStateToServer
 } from './services/notificationService';
 import { buildGoogleSheetCsvUrl } from './services/sheetsParser';
 import { DutyTab } from './components/DutyTab';
@@ -181,6 +183,7 @@ function MainApp() {
         .register('/sw.js', { updateViaCache: 'none' })
         .then((reg) => {
           reg.update().catch(() => {});
+          subscribeToServerPush(false).catch(() => {});
         })
         .catch(() => {});
 
@@ -376,10 +379,25 @@ function MainApp() {
     return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
   }, [featuredAssignment, isAlreadySent, handleMarkFeaturedDone]);
 
-  // Maxed-out repeating push watchdog + focus re-trigger + App Badge + Flashing Page Title
+  // Maxed-out repeating push watchdog + focus re-trigger + App Badge + Flashing Page Title + Server Push Sync
   useEffect(() => {
     const badgeTotal = (isDutyPending ? 1 : 0) + missingTodayCount;
     syncAppBadge(badgeTotal);
+
+    if (featuredAssignment) {
+      const teachersText = featuredAssignment.teachers.map(t => t.name).join(', ') || 'Teachers on duty';
+      syncDutyPushStateToServer({
+        assignmentId: featuredAssignment.id,
+        weekLabel: featuredAssignment.weekLabel,
+        teachersText,
+        dutyPeriod: `${featuredAssignment.startDate} - ${featuredAssignment.endDate}`,
+        isAlreadySent,
+        reminderEnabled: settings.reminderEnabled,
+        reminderDay: settings.reminderDay ?? 0,
+        reminderTime: settings.reminderTime ?? '08:00',
+        badgeCount: badgeTotal
+      });
+    }
 
     if (!isDutyPending || !featuredAssignment) {
       stopRepeatingAlarmSound();

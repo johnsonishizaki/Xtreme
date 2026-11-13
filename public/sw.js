@@ -1,5 +1,5 @@
 // Xtreme PWA Service Worker — Zero-Stale Network-First & Persistent Push Alerts
-const CACHE_NAME = 'xtreme-v5-network-first';
+const CACHE_NAME = 'xtreme-v6-network-first';
 
 const OFFLINE_FALLBACKS = [
   '/',
@@ -110,12 +110,14 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Persistent Push Notification Handler
+// Persistent Push Notification Handler (runs even when iPhone PWA is closed)
 self.addEventListener('push', (event) => {
   let data = {
     title: '⚠️ URGENT: Weekly Duty Action Required',
     body: 'Your teacher-duty announcement is pending. Tap now to send on WhatsApp or mark done.',
-    url: '/'
+    url: '/?tab=duty',
+    tag: 'xtreme-urgent-duty',
+    badgeCount: 1
   };
 
   if (event.data) {
@@ -138,11 +140,23 @@ self.addEventListener('push', (event) => {
       { action: 'open_duty', title: '📲 Open & Send' },
       { action: 'mark_done', title: '✅ Mark Done' }
     ],
-    data: { url: data.url || '/' }
+    data: { url: data.url || '/?tab=duty' }
   };
 
+  const badgeTask =
+    typeof self.navigator !== 'undefined' && typeof self.navigator.setAppBadge === 'function'
+      ? (typeof data.badgeCount === 'number' && data.badgeCount > 0
+          ? self.navigator.setAppBadge(data.badgeCount).catch(() => {})
+          : typeof self.navigator.clearAppBadge === 'function'
+            ? self.navigator.clearAppBadge().catch(() => {})
+            : Promise.resolve())
+      : Promise.resolve();
+
   event.waitUntil(
-    self.registration.showNotification(data.title, notificationOptions)
+    Promise.all([
+      badgeTask,
+      self.registration.showNotification(data.title, notificationOptions)
+    ])
   );
 });
 
@@ -153,27 +167,34 @@ self.addEventListener('notificationclick', (event) => {
     ? '/?action=mark_done'
     : (event.notification.data?.url || '/?tab=duty');
 
+  const markDoneTask = isMarkDone
+    ? fetch('/api/push/mark-done', { method: 'POST' })
+        .then(() => {
+          if (typeof self.navigator !== 'undefined' && typeof self.navigator.clearAppBadge === 'function') {
+            return self.navigator.clearAppBadge().catch(() => {});
+          }
+        })
+        .catch(() => {})
+    : Promise.resolve();
+
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      if (isMarkDone) {
+    Promise.all([
+      markDoneTask,
+      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
         for (const client of clientList) {
-          client.postMessage({ type: 'MARK_DUTY_DONE' });
+          client.postMessage({ type: isMarkDone ? 'MARK_DUTY_DONE' : 'OPEN_DUTY_TAB' });
         }
-      } else {
+
         for (const client of clientList) {
-          client.postMessage({ type: 'OPEN_DUTY_TAB' });
+          if (client.url && 'focus' in client) {
+            return client.focus();
+          }
         }
-      }
 
-      for (const client of clientList) {
-        if (client.url && 'focus' in client) {
-          return client.focus();
+        if (clients.openWindow) {
+          return clients.openWindow(targetUrl);
         }
-      }
-
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
-      }
-    })
+      })
+    ])
   );
 });
