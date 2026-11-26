@@ -182,7 +182,9 @@ self.addEventListener('notificationclick', (event) => {
       markDoneTask,
       clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
         for (const client of clientList) {
-          client.postMessage({ type: isMarkDone ? 'MARK_DUTY_DONE' : 'OPEN_DUTY_TAB' });
+          client.postMessage({
+            type: isMarkDone ? 'MARK_DUTY_DONE' : 'OPEN_DUTY_TAB'
+          });
         }
 
         for (const client of clientList) {

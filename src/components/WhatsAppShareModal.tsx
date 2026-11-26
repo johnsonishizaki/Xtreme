@@ -20,9 +20,11 @@ import {
   generateHouseRequestWhatsAppMessage,
   generateHouseStatusWhatsAppMessage,
   generateFullCollationWhatsAppMessage,
-  formatDutyDate
+  formatDutyDate,
+  getLocalTodayIso
 } from '../services/messageGenerator';
 import { collateDailyReports } from '../services/firebase';
+import { DateField } from './DateField';
 
 interface WhatsAppShareModalProps {
   isOpen: boolean;
@@ -47,7 +49,7 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
 }) => {
   const [selectedHouseId, setSelectedHouseId] = useState<string>(initialHouseId);
   const [selectedDate, setSelectedDate] = useState<string>(
-    initialDate || new Date().toISOString().split('T')[0]
+    initialDate || getLocalTodayIso()
   );
   const [messageType, setMessageType] = useState<'request' | 'status'>('request');
   const [phoneNumber, setPhoneNumber] = useState<string>('');
@@ -88,6 +90,16 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
     return houses.find(h => h.id === selectedHouseId) || null;
   }, [selectedHouseId, houses]);
 
+  useEffect(() => {
+    if (selectedHouse) {
+      setPhoneNumber(selectedHouse.houseparentPhone || '');
+    } else {
+      setPhoneNumber('');
+    }
+  }, [selectedHouse]);
+
+  const activeHousesCount = useMemo(() => houses.filter(h => h.active).length || houses.length, [houses]);
+
   const selectedReport = useMemo(() => {
     if (!selectedHouse) return undefined;
     return dateReportsMap.get(selectedHouse.id);
@@ -112,7 +124,8 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
         collation,
         activeOrderedHouses,
         dateReportsMap,
-        selectedDate
+        selectedDate,
+        activeTerm
       );
     }
 
@@ -121,7 +134,7 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
     } else {
       return generateHouseStatusWhatsAppMessage(selectedHouse, selectedReport, selectedDate);
     }
-  }, [selectedHouseId, selectedHouse, messageType, formUrl, selectedReport, selectedDate, collation, houses, dateReportsMap]);
+  }, [selectedHouseId, selectedHouse, messageType, formUrl, selectedReport, selectedDate, collation, houses, dateReportsMap, activeTerm]);
 
   if (!isOpen) return null;
 
@@ -178,7 +191,7 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
                 onChange={e => setSelectedHouseId(e.target.value)}
                 className="w-full pl-3 pr-8 py-2 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-xs text-[var(--text-page)] focus:border-emerald-500 outline-none appearance-none cursor-pointer font-medium"
               >
-                <option value="all">All 8 Houses (Full Summary)</option>
+                <option value="all">All {activeHousesCount} Houses (Full Summary)</option>
                 <optgroup label="Boys Houses">
                   {houses.filter(h => h.category === 'Boys').map(h => (
                     <option key={h.id} value={h.id}>
@@ -204,17 +217,17 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
               <label className="font-semibold text-[var(--text-page)]">Date</label>
               <button
                 type="button"
-                onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                onClick={() => setSelectedDate(getLocalTodayIso())}
                 className="text-[11px] text-emerald-500 hover:underline cursor-pointer"
               >
                 Today
               </button>
             </div>
-            <input
-              type="date"
+            <DateField
               value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-xs text-[var(--text-page)] focus:border-emerald-500 outline-none cursor-pointer"
+              onChange={setSelectedDate}
+              ariaLabel="WhatsApp report date"
+              className="w-full"
             />
           </div>
         </div>

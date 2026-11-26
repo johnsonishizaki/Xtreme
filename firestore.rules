@@ -50,5 +50,9 @@ service cloud.firestore {
     match /googleFormsSubmissions/{submissionId} {
       allow read, write: if true;
     }
+
+    match /aiChats/{chatId} {
+      allow read, write: if true;
+    }
   }
 }

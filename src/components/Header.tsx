@@ -14,7 +14,9 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  isDutyPending = false,
+  missingReportsCount = 0
 }) => {
   const { toggleTheme, isLight } = useTheme();
 
@@ -45,7 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('houseReports')}
-            className={`min-h-[34px] px-2.5 sm:px-3.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            className={`min-h-[34px] px-2.5 sm:px-3.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'houseReports' || activeTab === 'home'
                 ? 'bg-emerald-500 text-black'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-page)]'
@@ -53,12 +55,23 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Users className="w-3.5 h-3.5 shrink-0" />
             <span>Attendance</span>
+            {missingReportsCount > 0 && (
+              <span
+                className={`text-[10px] font-mono font-bold tabular-nums ${
+                  activeTab === 'houseReports' || activeTab === 'home'
+                    ? 'text-black/75'
+                    : 'text-amber-500'
+                }`}
+              >
+                ({missingReportsCount})
+              </span>
+            )}
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('duty')}
-            className={`min-h-[34px] px-2.5 sm:px-3.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            className={`min-h-[34px] px-2.5 sm:px-3.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'duty'
                 ? 'bg-emerald-500 text-black'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-page)]'
@@ -66,19 +79,29 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Calendar className="w-3.5 h-3.5 shrink-0" />
             <span>Duty</span>
+            {isDutyPending && (
+              <span
+                aria-label="Duty reminder pending"
+                className={`text-[10px] font-extrabold ${
+                  activeTab === 'duty' ? 'text-black/80' : 'text-amber-500'
+                }`}
+              >
+                •
+              </span>
+            )}
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('settings')}
-            className={`min-h-[34px] px-2.5 sm:px-3.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            className={`min-h-[34px] px-2.5 sm:px-3.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'settings'
                 ? 'bg-emerald-500 text-black'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-page)]'
             }`}
           >
             <SettingsIcon className="w-3.5 h-3.5 shrink-0" />
-            <span>Terms</span>
+            <span>Settings</span>
           </button>
         </nav>
 

@@ -23,11 +23,9 @@ import {
   handleGoogleFormsAttendanceWebhook,
   getGoogleFormsReceiverStatus
 } from './src/server/googleFormsReceiver.ts';
-import {
-  handleTallyWebhookPost,
-  getTallyWebhookReceiverStatus
-} from './src/server/tallyWebhookReceiver.ts';
+import { handleTallyWebhookPost, getTallyWebhookReceiverStatus } from './src/server/tallyWebhookReceiver.ts';
 import { pushService } from './src/server/pushService.ts';
+import { handleAiControllerRequest } from './src/server/aiController.ts';
 
 dotenv.config();
 
@@ -55,6 +53,17 @@ async function startServer() {
     } catch (err: any) {
       console.error('API /api/roster-parse error:', err);
       res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    }
+  });
+
+  // API endpoint for AI App Controller (Chatbot Widget)
+  app.post('/api/ai-controller', async (req, res) => {
+    try {
+      const result = await handleAiControllerRequest(req.body);
+      res.json(result);
+    } catch (err: any) {
+      console.error('API /api/ai-controller error:', err);
+      res.status(500).json({ success: false, error: err.message || 'AI controller error' });
     }
   });
 
@@ -215,7 +224,7 @@ async function startServer() {
       const terms: any[] = [];
       snap.forEach(d => {
         const t = d.data();
-        if (t && t.id) terms.push({ ...t, status: 'open' });
+        if (t && t.id) terms.push({ ...t, status: t.status || 'open' });
       });
       res.json({ success: true, count: terms.length, terms });
     } catch (err: any) {
@@ -249,6 +258,98 @@ async function startServer() {
       }
       await deleteDoc(doc(db, 'terms', termId));
       res.json({ success: true, termId });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/houses/update', async (req, res) => {
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const house = req.body;
+      if (!house || !house.id) {
+        return res.status(400).json({ success: false, error: 'Missing house id' });
+      }
+      await setDoc(doc(db, 'houses', house.id), house, { merge: true });
+      res.json({ success: true, house });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete('/api/reports/:id', async (req, res) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const reportId = req.params.id;
+      if (!reportId) {
+        return res.status(400).json({ success: false, error: 'Missing report id' });
+      }
+      await deleteDoc(doc(db, 'houseReports', reportId));
+      res.json({ success: true, reportId });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/duty/update', async (req, res) => {
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const assignment = req.body;
+      if (!assignment || !assignment.id) {
+        return res.status(400).json({ success: false, error: 'Missing assignment id' });
+      }
+      await setDoc(doc(db, 'dutyAssignments', assignment.id), assignment, { merge: true });
+      res.json({ success: true, assignment });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/ai-chats', async (_req, res) => {
+    try {
+      const { collection, getDocs } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const snap = await getDocs(collection(db, 'aiChats'));
+      const chats: any[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        if (data && data.id) chats.push(data);
+      });
+      chats.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      res.json({ success: true, chats });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, chats: [] });
+    }
+  });
+
+  app.post('/api/ai-chats', async (req, res) => {
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const chat = req.body;
+      if (!chat || !chat.id || !Array.isArray(chat.messages)) {
+        return res.status(400).json({ success: false, error: 'Invalid chat session payload' });
+      }
+      await setDoc(doc(db, 'aiChats', chat.id), chat, { merge: true });
+      res.json({ success: true, chat });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete('/api/ai-chats/:id', async (req, res) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/services/firebase.ts');
+      const chatId = req.params.id;
+      if (!chatId) {
+        return res.status(400).json({ success: false, error: 'Missing chat id' });
+      }
+      await deleteDoc(doc(db, 'aiChats', chatId));
+      res.json({ success: true, chatId });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -453,6 +554,37 @@ async function startServer() {
     try {
       const result = await pushService.sendTestDutyPush();
       res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // RFC-5545 Calendar Alarm (.ics) endpoint so iPhone Safari/PWA opens Apple Calendar natively
+  app.get('/api/duty/calendar.ics', async (req, res) => {
+    try {
+      const { buildDutyCalendarIcs } = await import('./src/services/notificationService.ts');
+      const day = Number(req.query.day ?? 0);
+      const time = String(req.query.time || '08:00');
+      const week = String(req.query.week || 'Weekly Teacher Duty');
+      const teachers = String(req.query.teachers || 'Teachers on Duty');
+      let events: any[] = [];
+      if (typeof req.query.events === 'string' && req.query.events.trim()) {
+        try {
+          const parsed = JSON.parse(req.query.events);
+          if (Array.isArray(parsed)) events = parsed;
+        } catch {}
+      }
+      const ics = buildDutyCalendarIcs({
+        reminderDay: day,
+        reminderTime: time,
+        weekLabel: week,
+        teachersText: teachers,
+        events
+      });
+      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+      res.setHeader('Content-Disposition', 'inline; filename="xtreme-duty-reminders.ics"');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.send(ics);
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }

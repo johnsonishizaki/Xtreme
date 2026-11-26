@@ -1,10 +1,20 @@
-import { DutyAssignment } from '../types';
+import { AcademicTerm, DutyAssignment } from '../types';
+
+/**
+ * Returns local calendar date in YYYY-MM-DD format (avoids UTC midnight day shift).
+ */
+export function getLocalTodayIso(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 /**
  * Formats YYYY-MM-DD or ISO date string into "13 November 2026"
  */
 export function formatDutyDate(dateStr: string): string {
-  if (!dateStr) return '';
+  if (!dateStr || !String(dateStr).trim()) return '';
   try {
     const parts = dateStr.split('-');
     if (parts.length === 3) {
@@ -31,6 +41,31 @@ export function formatDutyDate(dateStr: string): string {
 }
 
 /**
+ * Formats YYYY-MM-DD or ISO date string into "DD/MM/YYYY" (e.g. "16/11/2026")
+ */
+export function formatSlashDate(dateStr: string): string {
+  if (!dateStr) return '';
+  try {
+    const clean = dateStr.trim();
+    const parts = clean.split('T')[0].split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      const dd = parts[2].padStart(2, '0');
+      const mm = parts[1].padStart(2, '0');
+      const yyyy = parts[0];
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    const d = new Date(clean);
+    if (!isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    }
+  } catch {}
+  return dateStr;
+}
+
+/**
  * Builds the weekly teacher duty announcement from template and assignment data
  */
 export function generateAnnouncementMessage(
@@ -43,25 +78,42 @@ export function generateAnnouncementMessage(
   if (teachers.length === 0) {
     teachersText = 'Pending teacher assignment';
   } else {
+    const hasExplicitLeader = teachers.some(t =>
+      (t.role || '').toLowerCase().includes('leader')
+    );
+
     teachersText = teachers
       .map((t, idx) => {
-        const cleanRole = t.role && t.role.trim() && t.role.trim().toLowerCase() !== 'teacher'
-          ? ` — ${t.role.trim()}`
-          : '';
-        return `${idx + 1}. ${t.name.trim()}${cleanRole}`;
+        const cleanName = t.name.trim().toUpperCase();
+        const roleRaw = (t.role || '').trim();
+        const roleLower = roleRaw.toLowerCase();
+        const isLeader =
+          roleLower.includes('leader') || (!hasExplicitLeader && idx === 0);
+
+        if (isLeader) {
+          return `${idx + 1}. ${cleanName} *(LEADER)*`;
+        }
+        if (roleRaw && roleLower !== 'teacher' && roleLower !== 'member') {
+          return `${idx + 1}. ${cleanName} (${roleRaw.toUpperCase()})`;
+        }
+        return `${idx + 1}. ${cleanName}`;
       })
       .join('\n');
   }
 
-  const startDateFormatted = formatDutyDate(assignment.startDate);
-  const endDateFormatted = formatDutyDate(assignment.endDate);
-  const weekText = assignment.weekLabel || `${startDateFormatted} – ${endDateFormatted}`;
+  const startDateSlash = formatSlashDate(assignment.startDate);
+  const endDateSlash = formatSlashDate(assignment.endDate);
+  const startDateLong = formatDutyDate(assignment.startDate);
+  const endDateLong = formatDutyDate(assignment.endDate);
+  const weekText = (assignment.weekLabel || `${startDateSlash} – ${endDateSlash}`).trim();
   const dutyText = assignment.dutyTitle || 'Weekly Duty';
 
   return template
     .replace(/{TEACHERS}/g, teachersText)
-    .replace(/{START_DATE}/g, startDateFormatted)
-    .replace(/{END_DATE}/g, endDateFormatted)
+    .replace(/{START_DATE_LONG}/g, startDateLong)
+    .replace(/{END_DATE_LONG}/g, endDateLong)
+    .replace(/{START_DATE}/g, startDateSlash)
+    .replace(/{END_DATE}/g, endDateSlash)
     .replace(/{WEEK}/g, weekText)
     .replace(/{DUTY}/g, dutyText)
     .trim();
@@ -257,14 +309,22 @@ export function generateFullCollationWhatsAppMessage(
   },
   houses: Array<{ id: string; name: string; category: string }>,
   dateReportsMap: Map<string, { reportedCount: number; notReportedCount: number; expectedCount: number; notReportedDetails?: string }>,
-  dateStr: string
+  dateStr: string,
+  term?: AcademicTerm
 ): string {
   const formattedDate = formatDutyDate(dateStr) || dateStr;
   const boysCount = houses.filter(h => h.category === 'Boys').length || 4;
   const girlsCount = houses.filter(h => h.category === 'Girls').length || 4;
+  const isMidTerm =
+    term?.termType === 'midterm' ||
+    String(term?.termName || '').toLowerCase().includes('mid');
+  const reportTitle = isMidTerm
+    ? `📢 MID-TERM RETURN SCHOOL REPORT`
+    : `📢 TERM OPENING SCHOOL REPORT`;
 
   const lines: string[] = [
-    `📢 TERM OPENING SCHOOL REPORT`,
+    reportTitle,
+    ...(term ? [`🗓️ Period: ${term.termName} (${term.academicYear})`] : []),
     `📅 Date: ${formattedDate}`,
     ``,
     `📊 OVERALL TOTALS`,

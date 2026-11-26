@@ -13,7 +13,10 @@ import {
   Camera,
   Radio,
   Volume2,
-  CalendarPlus
+  VolumeX,
+  CalendarPlus,
+  Bell,
+  SlidersHorizontal
 } from 'lucide-react';
 import {
   DutyAssignment,
@@ -26,18 +29,29 @@ import {
   generateAnnouncementMessage,
   copyToClipboard,
   openWhatsApp,
-  formatDutyDate
+  formatDutyDate,
+  getLocalTodayIso
 } from '../services/messageGenerator';
 import {
   recordSendHistory,
+  unmarkDutySent,
   deleteRoster,
   setActiveRoster
 } from '../services/firebase';
 import {
   checkAndTriggerDutyAlert,
   testUrgentNotification,
-  downloadDutyCalendarAlarm
+  downloadDutyCalendarAlarm,
+  getNextReminderDate,
+  formatCountdownToReminder,
+  isDutyReminderOverdue,
+  getSnoozeRemainingMinutes,
+  snoozeSoundAlerts,
+  clearSoundSnooze,
+  type DutyIcsEventInput
 } from '../services/notificationService';
+import { exportDutySchedule, type ExportFormat } from '../services/exportService';
+import { ExportMenuButton } from './ExportMenuButton';
 
 interface DutyTabProps {
   rosters: Roster[];
@@ -49,7 +63,10 @@ interface DutyTabProps {
   onDeleteRoster?: (rosterId: string) => Promise<void>;
   onWhatsAppLaunched?: () => void;
   onTriggerAlarmTest?: () => void;
+  onOpenReminderSettings?: () => void;
 }
+
+const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export const DutyTab: React.FC<DutyTabProps> = ({
   rosters,
@@ -60,7 +77,8 @@ export const DutyTab: React.FC<DutyTabProps> = ({
   onRefreshData,
   onDeleteRoster,
   onWhatsAppLaunched,
-  onTriggerAlarmTest
+  onTriggerAlarmTest,
+  onOpenReminderSettings
 }) => {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const [copiedNotification, setCopiedNotification] = useState(false);
@@ -75,15 +93,27 @@ export const DutyTab: React.FC<DutyTabProps> = ({
   const [rosterPendingDelete, setRosterPendingDelete] = useState<Roster | null>(null);
   const [isDeletingRoster, setIsDeletingRoster] = useState(false);
 
+  const [nowTick, setNowTick] = useState(() => new Date());
+  const [snoozeMins, setSnoozeMins] = useState(() => getSnoozeRemainingMinutes());
+  const [pushTestStatus, setPushTestStatus] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowTick(new Date());
+      setSnoozeMins(getSnoozeRemainingMinutes());
+    }, 10000);
+    return () => clearInterval(id);
+  }, []);
 
   const activeRoster = useMemo(() => {
     return rosters.find(r => r.isActive) || rosters[0] || null;
   }, [rosters]);
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = getLocalTodayIso(nowTick);
 
   const activeAssignments = useMemo(() => {
     if (!activeRoster) return assignments;
@@ -126,6 +156,19 @@ export const DutyTab: React.FC<DutyTabProps> = ({
     return sendHistory.some(h => h.assignmentId === currentAssignment.id && h.status === 'sent_confirmed');
   }, [currentAssignment, sendHistory]);
 
+  const upcomingIcsEvents: DutyIcsEventInput[] = useMemo(() => {
+    return sortedAssignments
+      .filter(a => !a.endDate || a.endDate >= todayStr)
+      .slice(0, 8)
+      .map(a => ({
+        id: a.id,
+        weekLabel: a.weekLabel,
+        startDate: a.startDate,
+        endDate: a.endDate,
+        teachersText: a.teachers.map(t => t.name).join(', ') || 'Teachers on Duty'
+      }));
+  }, [sortedAssignments, todayStr]);
+
   useEffect(() => {
     if (currentAssignment) {
       const teachersText = currentAssignment.teachers.map(t => t.name).join(', ') || 'Teachers';
@@ -165,6 +208,12 @@ export const DutyTab: React.FC<DutyTabProps> = ({
 
   const handleMarkAsSent = async () => {
     if (!currentAssignment || !generatedMessage) return;
+    if (isAlreadySent) {
+      await unmarkDutySent(currentAssignment.id);
+      await onRefreshData();
+      setSentNotification(false);
+      return;
+    }
     await recordSendHistory({
       id: `sent-${Date.now()}`,
       assignmentId: currentAssignment.id,
@@ -172,7 +221,7 @@ export const DutyTab: React.FC<DutyTabProps> = ({
       dutyPeriod: `${formatDutyDate(currentAssignment.startDate)} - ${formatDutyDate(currentAssignment.endDate)}`,
       message: generatedMessage,
       timestamp: new Date().toISOString(),
-      status: !isAlreadySent ? 'sent_confirmed' : 'copied'
+      status: 'sent_confirmed'
     });
     await onRefreshData();
     setSentNotification(true);
@@ -291,6 +340,37 @@ export const DutyTab: React.FC<DutyTabProps> = ({
     }
   };
 
+  const handleExportDuty = async (format: ExportFormat) => {
+    return exportDutySchedule(format, {
+      roster: activeRoster,
+      assignments: sortedAssignments,
+      sendHistory,
+      currentAssignment,
+      messageTemplate: settings.messageTemplate
+    });
+  };
+
+  const reminderDay = settings.reminderDay ?? 0;
+  const reminderTime = settings.reminderTime || '08:00';
+  const nextReminderDate = getNextReminderDate(reminderDay, reminderTime, nowTick);
+  const countdownText = formatCountdownToReminder(nextReminderDate, nowTick);
+  const reminderOverdue = currentAssignment
+    ? isDutyReminderOverdue(
+        currentAssignment.startDate,
+        reminderDay,
+        reminderTime,
+        isAlreadySent,
+        nowTick
+      )
+    : false;
+
+  const handleTestReminder = async () => {
+    const ok = await testUrgentNotification();
+    setPushTestStatus(ok ? 'Alert & push delivered.' : 'Sound ring played.');
+    setTimeout(() => setPushTestStatus(null), 3000);
+    onTriggerAlarmTest?.();
+  };
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-5 space-y-5 pb-16 text-left">
       {/* Header + Add Roster Button */}
@@ -299,19 +379,29 @@ export const DutyTab: React.FC<DutyTabProps> = ({
           <h1 className="text-lg font-extrabold tracking-tight text-[var(--text-page)]">
             Teacher Duty
           </h1>
-          <p className="text-xs text-[var(--text-muted)]">
-            {activeRoster ? activeRoster.name : 'Weekly announcement'}
+          <p className="text-xs text-[var(--text-muted)] tabular-nums">
+            {activeRoster ? activeRoster.name : 'Weekly schedule'}
+            {' · '}
+            {settings.reminderEnabled
+              ? `Reminder: ${SHORT_DAYS[reminderDay]} ${reminderTime}`
+              : 'Reminder off'}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowImportSection(!showImportSection)}
-          className="min-h-[38px] px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] hover:border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer text-[var(--text-page)] transition-colors shrink-0"
-        >
-          <Camera className="w-3.5 h-3.5 text-emerald-500" />
-          <span>{showImportSection ? 'Close' : 'Add Roster'}</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {sortedAssignments.length > 0 && (
+            <ExportMenuButton label="Export" size="md" onExport={handleExportDuty} />
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowImportSection(!showImportSection)}
+            className="min-h-[38px] px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] hover:border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer text-[var(--text-page)] transition-colors shrink-0 whitespace-nowrap"
+          >
+            <Camera className="w-3.5 h-3.5 text-emerald-500" />
+            <span>{showImportSection ? 'Close' : 'Add Roster'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Collapsible Roster Upload Drawer */}
@@ -494,123 +584,214 @@ export const DutyTab: React.FC<DutyTabProps> = ({
 
       {/* Active Duty Card */}
       {currentAssignment ? (
-        <div className="p-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-4">
-          <div className="flex items-start justify-between border-b border-[var(--card-border-subtle)] pb-3 gap-3">
-            <div>
-              <h2 className="text-base font-extrabold text-[var(--text-page)]">
-                {currentAssignment.weekLabel} · {currentAssignment.dutyTitle || 'Weekly Duty'}
-              </h2>
-              <p className="text-xs text-[var(--text-muted)] flex items-center gap-1.5 mt-1 font-mono tabular-nums">
-                <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>{formatDutyDate(currentAssignment.startDate)} – {formatDutyDate(currentAssignment.endDate)}</span>
-              </p>
+        <>
+          <div className="p-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-4">
+            <div className="flex items-start justify-between border-b border-[var(--card-border-subtle)] pb-3 gap-3">
+              <div>
+                <h2 className="text-base font-extrabold text-[var(--text-page)]">
+                  {currentAssignment.weekLabel} · {currentAssignment.dutyTitle || 'Weekly Duty'}
+                </h2>
+                <p className="text-xs text-[var(--text-muted)] flex items-center gap-1.5 mt-1 font-mono tabular-nums">
+                  <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>{formatDutyDate(currentAssignment.startDate)} – {formatDutyDate(currentAssignment.endDate)}</span>
+                </p>
+              </div>
+
+              <span className={`text-xs font-bold flex items-center gap-1 shrink-0 ${isAlreadySent ? 'text-emerald-500' : 'text-amber-500'}`}>
+                {isAlreadySent ? <Check className="w-4 h-4" /> : <Clock className="w-3.5 h-3.5" />}
+                <span>{isAlreadySent ? 'Sent' : 'Pending'}</span>
+              </span>
             </div>
 
-            <span className={`text-xs font-bold flex items-center gap-1 shrink-0 ${isAlreadySent ? 'text-emerald-500' : 'text-amber-500'}`}>
-              {isAlreadySent ? <Check className="w-4 h-4" /> : <Clock className="w-3.5 h-3.5" />}
-              <span>{isAlreadySent ? 'Sent' : 'Pending'}</span>
-            </span>
-          </div>
-
-          {/* Teachers on Duty */}
-          <div className="flex flex-wrap gap-2">
-            {currentAssignment.teachers.map((t, tid) => (
-              <div
-                key={t.id || tid}
-                className="px-3 py-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] text-xs font-bold text-[var(--text-page)]"
-              >
-                {t.name}
-                {t.role && <span className="font-normal text-[var(--text-muted)] ml-1.5">· {t.role}</span>}
-              </div>
-            ))}
-          </div>
-
-          {/* Compact Message Preview */}
-          <div className="p-3.5 rounded-xl border border-[var(--card-border-subtle)] bg-[var(--code-bg)] font-mono text-xs whitespace-pre-wrap leading-relaxed text-[var(--text-page)] max-h-44 overflow-y-auto">
-            {generatedMessage}
-          </div>
-
-          {/* Primary Actions */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={handleOpenWhatsApp}
-              className="min-h-[42px] py-2 px-4 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-black transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-              <span>Send WhatsApp</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCopyMessage}
-              className="min-h-[42px] py-2 px-4 rounded-xl font-bold text-xs border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-emerald-500/50 text-[var(--text-page)] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              {copiedNotification ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-              <span>{copiedNotification ? 'Copied' : 'Copy Text'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleMarkAsSent}
-              className={`min-h-[42px] py-2 px-4 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer border ${
-                isAlreadySent || sentNotification
-                  ? 'border-emerald-500/45 text-emerald-500 bg-emerald-500/10'
-                  : 'border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-page)] hover:border-emerald-500/50'
-              }`}
-            >
-              <Check className="w-4 h-4 text-emerald-500" />
-              <span>{isAlreadySent || sentNotification ? 'Done (Undo)' : 'Mark Done'}</span>
-            </button>
-          </div>
-
-          {/* Secondary Utility Links */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[var(--card-border-subtle)] text-xs">
-            <button
-              type="button"
-              onClick={() => {
-                testUrgentNotification();
-                onTriggerAlarmTest?.();
-              }}
-              className="text-[var(--text-muted)] hover:text-amber-500 font-medium flex items-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <Volume2 className="w-3.5 h-3.5" />
-              <span>Test Alarm &amp; Push</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                const teachersText = currentAssignment.teachers.map(t => t.name).join(', ') || 'Teachers on duty';
-                downloadDutyCalendarAlarm(
-                  settings.reminderDay ?? 0,
-                  settings.reminderTime ?? '08:00',
-                  currentAssignment.weekLabel,
-                  teachersText
+            {/* Teachers on Duty */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {currentAssignment.teachers.map((t, tid) => {
+                const isLeader = (t.role || '').toLowerCase().includes('leader') || tid === 0;
+                return (
+                  <div
+                    key={t.id || tid}
+                    className="px-3.5 py-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] flex items-center justify-between gap-2 text-xs"
+                  >
+                    <span className="font-bold text-[var(--text-page)] truncate">
+                      {tid + 1}. {t.name}
+                    </span>
+                    <span className={`text-[11px] font-semibold shrink-0 ${isLeader ? 'text-emerald-500' : 'text-[var(--text-muted)]'}`}>
+                      {t.role || (isLeader ? 'Leader' : 'Duty Teacher')}
+                    </span>
+                  </div>
                 );
-              }}
-              className="text-[var(--text-muted)] hover:text-emerald-500 font-medium flex items-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <CalendarPlus className="w-3.5 h-3.5" />
-              <span>iPhone Lock Alarm (.ics)</span>
-            </button>
+              })}
+            </div>
 
-            <button
-              type="button"
-              onClick={async () => {
-                const ok = await copyToClipboard('https://tally.so/r/2jBVWA');
-                if (ok) {
-                  setCopiedTallyLink(true);
-                  setTimeout(() => setCopiedTallyLink(false), 2500);
-                }
-              }}
-              className="text-[var(--text-muted)] hover:text-emerald-500 font-medium flex items-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <Radio className="w-3.5 h-3.5" />
-              <span>{copiedTallyLink ? 'Form Link Copied' : 'Copy Arrival Form Link'}</span>
-            </button>
+            {/* Formatted Message Preview */}
+            <div className="p-3.5 rounded-xl border border-[var(--card-border-subtle)] bg-[var(--code-bg)] font-mono text-xs whitespace-pre-wrap leading-relaxed text-[var(--text-page)] max-h-48 overflow-y-auto">
+              {generatedMessage}
+            </div>
+
+            {/* Primary Manual Dispatch Actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={handleOpenWhatsApp}
+                className="min-h-[44px] py-2 px-4 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-black transition-colors flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Send className="w-4 h-4 shrink-0" />
+                <span>Send WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyMessage}
+                className="min-h-[44px] py-2 px-4 rounded-xl font-bold text-xs border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-emerald-500/50 text-[var(--text-page)] transition-colors flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                {copiedNotification ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <Copy className="w-4 h-4 shrink-0" />}
+                <span>{copiedNotification ? 'Copied' : 'Copy Text'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleMarkAsSent}
+                className={`min-h-[44px] py-2 px-4 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer border whitespace-nowrap ${
+                  isAlreadySent || sentNotification
+                    ? 'border-emerald-500/45 text-emerald-500 bg-emerald-500/10'
+                    : 'border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-page)] hover:border-emerald-500/50'
+                }`}
+              >
+                <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>{isAlreadySent || sentNotification ? 'Done (Undo)' : 'Mark Done'}</span>
+              </button>
+            </div>
           </div>
-        </div>
+
+          {/* Dedicated Reminder & Calendar Control Card */}
+          <div className="p-4 sm:p-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--card-border-subtle)] pb-3">
+              <div className="flex items-start gap-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${
+                    isAlreadySent
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                      : reminderOverdue
+                        ? 'bg-amber-500/15 border-amber-500/45 text-amber-500'
+                        : 'bg-[var(--card-bg-elevated)] border-[var(--card-border)] text-emerald-500'
+                  }`}
+                >
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-[var(--text-page)]">
+                    Duty Reminder &amp; Calendar Alarms
+                  </h3>
+                  <p className="text-xs text-[var(--text-muted)] tabular-nums mt-0.5">
+                    {!settings.reminderEnabled ? (
+                      'Weekly reminder schedule is turned off.'
+                    ) : isAlreadySent ? (
+                      `This week is done · Next alert ${SHORT_DAYS[reminderDay]} at ${reminderTime} (${countdownText})`
+                    ) : reminderOverdue ? (
+                      <span className="text-amber-500 font-semibold">
+                        Reminder due now — tap Send WhatsApp or Mark Done to silence
+                      </span>
+                    ) : (
+                      `Scheduled every ${SHORT_DAYS[reminderDay]} at ${reminderTime} · Alert in ${countdownText}`
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {onOpenReminderSettings && (
+                <button
+                  type="button"
+                  onClick={onOpenReminderSettings}
+                  className="min-h-[34px] px-3 py-1 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-emerald-500 text-xs font-semibold text-[var(--text-page)] flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Adjust Schedule</span>
+                </button>
+              )}
+            </div>
+
+            {pushTestStatus && (
+              <div className="p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-500 text-xs font-semibold">
+                {pushTestStatus}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={handleTestReminder}
+                className="min-h-[42px] px-3 py-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-amber-500/60 text-xs font-bold text-[var(--text-page)] flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+              >
+                <Volume2 className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Test Reminder</span>
+              </button>
+
+              {snoozeMins > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSoundSnooze();
+                    setSnoozeMins(0);
+                  }}
+                  className="min-h-[42px] px-3 py-2 rounded-xl border border-amber-500/50 bg-amber-500/10 text-xs font-bold text-amber-500 flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap tabular-nums"
+                >
+                  <VolumeX className="w-4 h-4 shrink-0" />
+                  <span>Resume ({snoozeMins}m)</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    snoozeSoundAlerts(30);
+                    setSnoozeMins(30);
+                  }}
+                  disabled={isAlreadySent}
+                  className="min-h-[42px] px-3 py-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-amber-500/50 disabled:opacity-45 text-xs font-bold text-[var(--text-page)] flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  <VolumeX className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+                  <span>Snooze 30m</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const teachersText = currentAssignment.teachers.map(t => t.name).join(', ') || 'Teachers on duty';
+                  downloadDutyCalendarAlarm(
+                    reminderDay,
+                    reminderTime,
+                    currentAssignment.weekLabel,
+                    teachersText,
+                    upcomingIcsEvents
+                  );
+                }}
+                className="min-h-[42px] px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-bold text-emerald-500 flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+              >
+                <CalendarPlus className="w-4 h-4 shrink-0" />
+                <span>
+                  {upcomingIcsEvents.length > 1
+                    ? `Calendar (${upcomingIcsEvents.length} wks)`
+                    : 'Calendar (.ics)'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await copyToClipboard('https://tally.so/r/2jBVWA');
+                  if (ok) {
+                    setCopiedTallyLink(true);
+                    setTimeout(() => setCopiedTallyLink(false), 2500);
+                  }
+                }}
+                className="min-h-[42px] px-3 py-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg-elevated)] hover:border-emerald-500/50 text-xs font-bold text-[var(--text-page)] flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+              >
+                <Radio className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>{copiedTallyLink ? 'Copied Link' : 'Arrival Form Link'}</span>
+              </button>
+            </div>
+          </div>
+        </>
       ) : (
         <div className="p-8 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] text-center space-y-3">
           <FileSpreadsheet className="w-8 h-8 text-emerald-500 mx-auto" />

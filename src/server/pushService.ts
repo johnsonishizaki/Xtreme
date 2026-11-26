@@ -398,9 +398,12 @@ class WebPushNotificationService {
         }
 
         this.lastScheduledPushAt = Date.now();
+        const snippet = state.message
+          ? state.message.split('\n').slice(0, 4).join(' · ')
+          : `On Duty: ${state.teachersText}. Tap to send via WhatsApp or Mark Done.`;
         await this.broadcastPush({
-          title: `⚠️ SEND DUTY NOW (${state.weekLabel})`,
-          body: `On Duty: ${state.teachersText}. Tap to send via WhatsApp or Mark Done.`,
+          title: `🔔 Duty Reminder (${state.weekLabel})`,
+          body: snippet,
           url: '/?tab=duty',
           tag: `xtreme-duty-due-${state.assignmentId}`,
           badgeCount: Math.max(1, state.badgeCount || 1),

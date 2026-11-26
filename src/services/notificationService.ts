@@ -564,80 +564,292 @@ export async function testUrgentNotification(): Promise<boolean> {
   return false;
 }
 
+export function snoozeUntilTimestamp(targetMs: number): number {
+  stopRepeatingAlarmSound();
+  const safeTarget = Math.max(Date.now() + 60 * 1000, targetMs);
+  try {
+    localStorage.setItem(SOUND_SNOOZE_KEY, String(safeTarget));
+  } catch {}
+  return safeTarget;
+}
+
+export function getTonightSnoozeTimestamp(hour24: number = 19, minute: number = 0): number {
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour24, minute, 0, 0);
+  if (target.getTime() <= now.getTime() + 5 * 60 * 1000) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target.getTime();
+}
+
+export function getNextReminderDate(
+  reminderDay: number = 0,
+  reminderTime: string = '08:00',
+  referenceNow: Date = new Date()
+): Date {
+  const [hhStr, mmStr] = (reminderTime || '08:00').split(':');
+  const hh = Math.max(0, Math.min(23, Number.isFinite(parseInt(hhStr, 10)) ? parseInt(hhStr, 10) : 8));
+  const mm = Math.max(0, Math.min(59, Number.isFinite(parseInt(mmStr, 10)) ? parseInt(mmStr, 10) : 0));
+
+  const next = new Date(referenceNow);
+  const normalizedDay = ((Number(reminderDay) || 0) % 7 + 7) % 7;
+  const diff = (normalizedDay - referenceNow.getDay() + 7) % 7;
+  next.setDate(referenceNow.getDate() + diff);
+  next.setHours(hh, mm, 0, 0);
+  if (next.getTime() <= referenceNow.getTime()) {
+    next.setDate(next.getDate() + 7);
+  }
+  return next;
+}
+
+export function formatCountdownToReminder(
+  targetDate: Date,
+  referenceNow: Date = new Date()
+): string {
+  const diffMs = Math.max(0, targetDate.getTime() - referenceNow.getTime());
+  const totalMins = Math.floor(diffMs / 60000);
+  const days = Math.floor(totalMins / (60 * 24));
+  const hours = Math.floor((totalMins % (60 * 24)) / 60);
+  const mins = totalMins % 60;
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${Math.max(1, mins)}m`;
+}
+
+export function isDutyReminderOverdue(
+  assignmentStartDate: string | undefined,
+  reminderDay: number = 0,
+  reminderTime: string = '08:00',
+  isAlreadySent: boolean = false,
+  referenceNow: Date = new Date()
+): boolean {
+  if (isAlreadySent) return false;
+  if (isTodayReminderDay(reminderDay, referenceNow) && hasReminderTimePassed(reminderTime, referenceNow)) {
+    return true;
+  }
+  if (!assignmentStartDate || !/^\d{4}-\d{2}-\d{2}$/.test(assignmentStartDate)) {
+    return false;
+  }
+  const [y, m, d] = assignmentStartDate.split('-').map(Number);
+  const [hhStr, mmStr] = (reminderTime || '08:00').split(':');
+  const hh = Math.max(0, Math.min(23, Number.isFinite(parseInt(hhStr, 10)) ? parseInt(hhStr, 10) : 8));
+  const mm = Math.max(0, Math.min(59, Number.isFinite(parseInt(mmStr, 10)) ? parseInt(mmStr, 10) : 0));
+
+  // Duty window start + reminder offset
+  const dutyStart = new Date(y, m - 1, d, hh, mm, 0, 0);
+  return referenceNow.getTime() >= dutyStart.getTime();
+}
+
+export interface DutyIcsEventInput {
+  id?: string;
+  weekLabel: string;
+  startDate: string;
+  endDate: string;
+  teachersText: string;
+}
+
+function escapeIcsText(raw: string): string {
+  return String(raw || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r\n|\r|\n/g, '\\n')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,');
+}
+
+function computeReminderDateForWeek(
+  weekStartIso: string,
+  reminderDay: number,
+  hh: number,
+  mm: number
+): Date {
+  const [y, m, d] = weekStartIso.split('-').map(Number);
+  const start = new Date(y, m - 1, d, hh, mm, 0, 0);
+  const normalizedDay = ((Number(reminderDay) || 0) % 7 + 7) % 7;
+  const startDay = start.getDay();
+  // Match Sunday (0) right before Monday duty start (-1 day), or matching day within that duty week
+  let delta = normalizedDay - startDay;
+  if (delta < -1) delta += 7;
+  if (delta > 5) delta -= 7;
+  const target = new Date(start);
+  target.setDate(start.getDate() + delta);
+  target.setHours(hh, mm, 0, 0);
+  return target;
+}
+
+export function buildDutyCalendarIcs(options: {
+  reminderDay?: number;
+  reminderTime?: string;
+  weekLabel?: string;
+  teachersText?: string;
+  events?: DutyIcsEventInput[];
+}): string {
+  const {
+    reminderDay = 0,
+    reminderTime = '08:00',
+    weekLabel = 'Weekly Teacher Duty',
+    teachersText = 'Teachers on Duty',
+    events = []
+  } = options;
+
+  const dayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  const normalizedDay = ((Number(reminderDay) || 0) % 7 + 7) % 7;
+  const targetDayCode = dayCodes[normalizedDay] || 'SU';
+  const [hhStr, mmStr] = (reminderTime || '08:00').split(':');
+  const hh = Math.max(0, Math.min(23, Number.isFinite(parseInt(hhStr, 10)) ? parseInt(hhStr, 10) : 8));
+  const mm = Math.max(0, Math.min(59, Number.isFinite(parseInt(mmStr, 10)) ? parseInt(mmStr, 10) : 0));
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const formatLocalIcs = (dt: Date) =>
+    `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+  const lines: string[] = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//OLAG SHS Xtreme//Duty Reminder//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'X-WR-CALNAME:OLAG SHS Duty Reminders'
+  ];
+
+  const validWeekEvents = events.filter(
+    e => /^\d{4}-\d{2}-\d{2}$/.test(e.startDate || '')
+  );
+
+  if (validWeekEvents.length > 0) {
+    validWeekEvents.forEach((ev, idx) => {
+      const startDt = computeReminderDateForWeek(ev.startDate, normalizedDay, hh, mm);
+      const endDt = new Date(startDt.getTime() + 15 * 60 * 1000);
+      const summary = escapeIcsText(`Send ${ev.weekLabel} Duty Announcement`);
+      const desc = escapeIcsText(
+        `Open Xtreme to copy & send the formatted WhatsApp announcement for ${ev.weekLabel} (${ev.startDate} to ${ev.endDate}).\n\nOn Duty: ${ev.teachersText}`
+      );
+      const uid = `xtreme-duty-${(ev.id || `${ev.startDate}-${idx}`).replace(/[^a-zA-Z0-9_-]/g, '')}@olagshs.app`;
+
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:${uid}`,
+        `DTSTAMP:${stamp}`,
+        `DTSTART:${formatLocalIcs(startDt)}`,
+        `DTEND:${formatLocalIcs(endDt)}`,
+        `SUMMARY:${summary}`,
+        `DESCRIPTION:${desc}`,
+        'STATUS:CONFIRMED',
+        'BEGIN:VALARM',
+        'TRIGGER:-PT0M',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:${summary}`,
+        'END:VALARM',
+        'BEGIN:VALARM',
+        'TRIGGER:-PT15M',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:Upcoming in 15 mins: ${summary}`,
+        'END:VALARM',
+        'END:VEVENT'
+      );
+    });
+  } else {
+    const next = getNextReminderDate(normalizedDay, reminderTime);
+    const endDt = new Date(next.getTime() + 15 * 60 * 1000);
+    const summary = escapeIcsText(`Send ${weekLabel} Duty Announcement`);
+    const desc = escapeIcsText(
+      `Open Xtreme to copy & send this week's teacher duty message on WhatsApp.\n\nTeam: ${teachersText}`
+    );
+
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:xtreme-duty-weekly-${targetDayCode}@olagshs.app`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${formatLocalIcs(next)}`,
+      `DTEND:${formatLocalIcs(endDt)}`,
+      `RRULE:FREQ=WEEKLY;BYDAY=${targetDayCode}`,
+      `SUMMARY:${summary}`,
+      `DESCRIPTION:${desc}`,
+      'STATUS:CONFIRMED',
+      'BEGIN:VALARM',
+      'TRIGGER:-PT0M',
+      'ACTION:DISPLAY',
+      `DESCRIPTION:${summary}`,
+      'END:VALARM',
+      'BEGIN:VALARM',
+      'TRIGGER:-PT15M',
+      'ACTION:DISPLAY',
+      `DESCRIPTION:Upcoming in 15 mins: ${summary}`,
+      'END:VALARM',
+      'END:VEVENT'
+    );
+  }
+
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
+
 export function downloadDutyCalendarAlarm(
   reminderDay: number = 0,
   reminderTime: string = '08:00',
   weekLabel: string = 'Weekly Teacher Duty',
-  teachersText: string = 'Teachers on Duty'
+  teachersText: string = 'Teachers on Duty',
+  events?: DutyIcsEventInput[]
 ): void {
-  const dayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-  const targetDayCode = dayCodes[reminderDay] || 'SU';
-  const [hhStr, mmStr] = (reminderTime || '08:00').split(':');
-  const hh = Math.max(0, Math.min(23, parseInt(hhStr, 10) || 8));
-  const mm = Math.max(0, Math.min(59, parseInt(mmStr, 10) || 0));
-
-  const now = new Date();
-  const next = new Date(now);
-  const diff = (reminderDay - now.getDay() + 7) % 7;
-  next.setDate(now.getDate() + diff);
-  next.setHours(hh, mm, 0, 0);
-  if (next.getTime() <= now.getTime()) {
-    next.setDate(next.getDate() + 7);
+  if (typeof window !== 'undefined' && window.location?.origin?.startsWith('http')) {
+    const params = new URLSearchParams({
+      day: String(reminderDay ?? 0),
+      time: reminderTime || '08:00',
+      week: weekLabel || 'Weekly Teacher Duty',
+      teachers: teachersText || 'Teachers on Duty'
+    });
+    if (events && events.length > 0) {
+      params.set(
+        'events',
+        JSON.stringify(events.slice(0, 8))
+      );
+    }
+    const serverUrl = `${window.location.origin}/api/duty/calendar.ics?${params.toString()}`;
+    if (isIOSDevice()) {
+      // iOS Safari & Standalone PWAs open Apple Calendar's native "Add Events" sheet directly on text/calendar URLs
+      window.location.assign(serverUrl);
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = serverUrl;
+    link.download = 'xtreme-duty-reminders.ics';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return;
   }
 
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const dtStart = `${next.getFullYear()}${pad(next.getMonth() + 1)}${pad(next.getDate())}T${pad(hh)}${pad(mm)}00`;
-  const endHour = (hh + (mm >= 45 ? 1 : 0)) % 24;
-  const endMin = (mm + 15) % 60;
-  const dtEnd = `${next.getFullYear()}${pad(next.getMonth() + 1)}${pad(next.getDate())}T${pad(endHour)}${pad(endMin)}00`;
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-
-  const icsLines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Xtreme OLAG SHS//Duty Reminder//EN',
-    'CALSCALE:GREGORIAN',
-    'BEGIN:VEVENT',
-    `UID:xtreme-duty-weekly-${targetDayCode}@olagshs.app`,
-    `DTSTAMP:${stamp}`,
-    `DTSTART:${dtStart}`,
-    `DTEND:${dtEnd}`,
-    `RRULE:FREQ=WEEKLY;BYDAY=${targetDayCode}`,
-    `SUMMARY:⚠️ Send Weekly Teacher Duty (${weekLabel})`,
-    `DESCRIPTION:Open Xtreme to send this week's teacher duty message on WhatsApp.\\n\\nCurrent team: ${teachersText}`,
-    'BEGIN:VALARM',
-    'TRIGGER:PT0S',
-    'ACTION:DISPLAY',
-    'DESCRIPTION:Send Weekly Teacher Duty on WhatsApp now!',
-    'END:VALARM',
-    'BEGIN:VALARM',
-    'TRIGGER:-PT15M',
-    'ACTION:AUDIO',
-    'END:VALARM',
-    'END:VEVENT',
-    'END:VCALENDAR'
-  ].join('\r\n');
-
-  const blob = new Blob([icsLines], { type: 'text/calendar;charset=utf-8' });
+  // Offline / non-HTTP fallback
+  const icsContent = buildDutyCalendarIcs({
+    reminderDay,
+    reminderTime,
+    weekLabel,
+    teachersText,
+    events
+  });
+  if (typeof document === 'undefined') return;
+  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'xtreme-duty-alarm.ics';
+  link.download = 'xtreme-duty-reminders.ics';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-export function isTodayReminderDay(targetDay: number = 0): boolean {
-  const today = new Date().getDay();
-  return today === targetDay;
+export function isTodayReminderDay(targetDay: number = 0, referenceNow: Date = new Date()): boolean {
+  const normalizedDay = ((Number(targetDay) || 0) % 7 + 7) % 7;
+  return referenceNow.getDay() === normalizedDay;
 }
 
-export function hasReminderTimePassed(timeStr: string = '08:00'): boolean {
-  const [hours, minutes] = timeStr.split(':').map(Number);
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+export function hasReminderTimePassed(timeStr: string = '08:00', referenceNow: Date = new Date()): boolean {
+  const [hoursStr, minutesStr] = (timeStr || '08:00').split(':');
+  const hours = Number.isFinite(parseInt(hoursStr, 10)) ? parseInt(hoursStr, 10) : 8;
+  const minutes = Number.isFinite(parseInt(minutesStr, 10)) ? parseInt(minutesStr, 10) : 0;
+  const currentMinutes = referenceNow.getHours() * 60 + referenceNow.getMinutes();
   const targetMinutes = hours * 60 + minutes;
   return currentMinutes >= targetMinutes;
 }

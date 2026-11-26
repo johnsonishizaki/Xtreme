@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -66,19 +66,20 @@ Return a JSON array of weekly assignments.`;
   parts.push({ text: promptText });
 
   const candidateModels = [
-    'gemini-3.8-flash',
-    'gemini-3.1-flash-lite',
-    'gemini-2.5-flash'
-  ];
+    { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW }
+  ] as const;
   let lastError: any = null;
 
-  for (const modelName of candidateModels) {
+  for (const candidate of candidateModels) {
+    const modelName = candidate.model;
     try {
       const response = await ai.models.generateContent({
         model: modelName,
         contents: { parts },
         config: {
           systemInstruction,
+          thinkingConfig: { thinkingLevel: candidate.thinkingLevel },
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.ARRAY,
@@ -109,8 +110,14 @@ Return a JSON array of weekly assignments.`;
         }
       });
 
-      const outputText = response.text || '[]';
-      const assignments = JSON.parse(outputText);
+      const outputText = (response.text || '[]').trim();
+      const cleanedText = outputText.startsWith('```')
+        ? outputText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```[\s]*$/i, '').trim()
+        : outputText;
+      const startArr = cleanedText.indexOf('[');
+      const endArr = cleanedText.lastIndexOf(']');
+      const slice = startArr !== -1 && endArr > startArr ? cleanedText.slice(startArr, endArr + 1) : cleanedText;
+      const assignments = JSON.parse(slice || '[]');
 
       return {
         success: true,

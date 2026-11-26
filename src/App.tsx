@@ -25,6 +25,7 @@ import {
   saveRosterWithAssignments,
   saveSettings,
   deleteRoster,
+  unmarkDutySent,
   getCachedSettings,
   getCachedRosters,
   getCachedDutyAssignments,
@@ -45,13 +46,18 @@ import {
   subscribeToServerPush,
   syncDutyPushStateToServer
 } from './services/notificationService';
+import {
+  generateAnnouncementMessage,
+  getLocalTodayIso
+} from './services/messageGenerator';
 import { buildGoogleSheetCsvUrl } from './services/sheetsParser';
 import { DutyTab } from './components/DutyTab';
-import { HouseReportingTab } from './components/HouseReportingTab';
+import { HouseReportingTab, type ExternalHouseModalAction } from './components/HouseReportingTab';
 import { SettingsTab } from './components/SettingsTab';
 import { ReviewDataModal } from './components/ReviewDataModal';
 import { UrgentDutyBanner, type AlarmSheetMode } from './components/UrgentDutyBanner';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { AIChatController } from './components/AIChatController';
 
 function getSimpleHash(str: string): string {
   let hash = 0;
@@ -65,7 +71,7 @@ function getSimpleHash(str: string): string {
 
 function MainApp() {
   const { user } = useAuth();
-  const { setTheme } = useTheme();
+  const { setTheme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<ActiveNavTab>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -83,11 +89,13 @@ function MainApp() {
   const [houses, setHouses] = useState<HouseConfig[]>(() => getCachedHouses());
   const [terms, setTerms] = useState<AcademicTerm[]>(() => getCachedTerms());
   const [reports, setReports] = useState<HouseDailyReport[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>(() => getLocalTodayIso());
   const [settingsInitialSection, setSettingsInitialSection] = useState<string>('terms');
   const [reviewData, setReviewData] = useState<ParsedRosterPayload | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [alarmSheetMode, setAlarmSheetMode] = useState<AlarmSheetMode>('none');
+  const [externalModalAction, setExternalModalAction] = useState<ExternalHouseModalAction | null>(null);
   const awaitingWhatsAppReturnRef = useRef<boolean>(false);
   const bootVersionRef = useRef<string | null>(null);
 
@@ -210,6 +218,7 @@ function MainApp() {
       if (isMounted) setReports(liveReports);
     });
 
+    // Periodic fallback refresh every 30s (onSnapshot already handles instant live updates)
     const timer = setInterval(async () => {
       if (!isMounted || document.visibilityState !== 'visible') return;
       try {
@@ -220,7 +229,7 @@ function MainApp() {
       } catch {
         // Silent background check
       }
-    }, 1000);
+    }, 30000);
 
     return () => {
       isMounted = false;
@@ -294,7 +303,7 @@ function MainApp() {
 
   // Active Roster & Featured THIS Week Assignment
   const activeRoster = rosters.find(r => r.isActive) || rosters[0] || null;
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => getLocalTodayIso(), []);
 
   const activeAssignments = useMemo(() => {
     if (!activeRoster) return assignments;
@@ -352,6 +361,14 @@ function MainApp() {
     setTimeout(() => setSuccessToast(null), 3500);
   }, [featuredAssignment, settings.messageTemplate, refreshAllData]);
 
+  const handleUnmarkFeaturedDone = useCallback(async () => {
+    if (!featuredAssignment) return;
+    await unmarkDutySent(featuredAssignment.id);
+    await refreshAllData();
+    setSuccessToast(`Restored ${featuredAssignment.weekLabel} to pending.`);
+    setTimeout(() => setSuccessToast(null), 3500);
+  }, [featuredAssignment, refreshAllData]);
+
   const handleWhatsAppLaunched = useCallback(() => {
     stopRepeatingAlarmSound();
     awaitingWhatsAppReturnRef.current = true;
@@ -373,6 +390,9 @@ function MainApp() {
         handleMarkFeaturedDone();
       } else if (event.data?.type === 'OPEN_DUTY_TAB') {
         setActiveTab('duty');
+        if (featuredAssignment && !isAlreadySent && !isSoundSnoozed()) {
+          setAlarmSheetMode('alarm');
+        }
       }
     };
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
@@ -386,11 +406,13 @@ function MainApp() {
 
     if (featuredAssignment) {
       const teachersText = featuredAssignment.teachers.map(t => t.name).join(', ') || 'Teachers on duty';
+      const formattedMessage = generateAnnouncementMessage(settings.messageTemplate, featuredAssignment);
       syncDutyPushStateToServer({
         assignmentId: featuredAssignment.id,
         weekLabel: featuredAssignment.weekLabel,
         teachersText,
         dutyPeriod: `${featuredAssignment.startDate} - ${featuredAssignment.endDate}`,
+        message: formattedMessage,
         isAlreadySent,
         reminderEnabled: settings.reminderEnabled,
         reminderDay: settings.reminderDay ?? 0,
@@ -461,14 +483,14 @@ function MainApp() {
     };
   }, [isDutyPending, featuredAssignment, missingTodayCount]);
 
-  // Scheduled Sunday Reminder Alarm
+  // Scheduled Weekly Duty Reminder (Manual send only — alerts without auto-copying or auto-sending)
   useEffect(() => {
     if (!settings.reminderEnabled || !isDutyPending || !featuredAssignment) return;
 
-    const checkSundayReminder = async () => {
+    const checkScheduledReminder = async () => {
       const isDay = isTodayReminderDay(settings.reminderDay ?? 0);
       const isTime = hasReminderTimePassed(settings.reminderTime ?? '08:00');
-      if (isDay && isTime && assignments.length > 0) {
+      if (isDay && isTime && assignments.length > 0 && !isSoundSnoozed()) {
         const teachersText = featuredAssignment.teachers.map(t => t.name).join(', ') || 'Teachers';
         await checkAndTriggerDutyAlert(
           featuredAssignment.id,
@@ -477,13 +499,29 @@ function MainApp() {
           false,
           false
         );
+
+        if (typeof window !== 'undefined') {
+          const reminderWindowKey = `xtreme_reminded_${featuredAssignment.id}_${todayStr}`;
+          if (!localStorage.getItem(reminderWindowKey)) {
+            localStorage.setItem(reminderWindowKey, '1');
+            setAlarmSheetMode('alarm');
+          }
+        }
       }
     };
 
-    checkSundayReminder();
-    const timer = setInterval(checkSundayReminder, 60 * 1000);
+    checkScheduledReminder();
+    const timer = setInterval(checkScheduledReminder, 60 * 1000);
     return () => clearInterval(timer);
-  }, [settings.reminderEnabled, settings.reminderDay, settings.reminderTime, assignments.length, isDutyPending, featuredAssignment]);
+  }, [
+    settings.reminderEnabled,
+    settings.reminderDay,
+    settings.reminderTime,
+    assignments.length,
+    isDutyPending,
+    featuredAssignment,
+    todayStr
+  ]);
 
   const handleConfirmSaveRoster = async (newRoster: Roster, newAssignments: DutyAssignment[]): Promise<void> => {
     await saveRosterWithAssignments(newRoster, newAssignments);
@@ -529,9 +567,10 @@ function MainApp() {
         missingReportsCount={missingTodayCount}
       />
 
-      {/* Impossible-to-miss Pinned Banner & iPhone Alarm Sheet while Weekly Duty is Pending */}
+      {/* Impossible-to-miss Pinned Banner & Reminder Sheet while Weekly Duty is Pending */}
       <UrgentDutyBanner
         featuredAssignment={featuredAssignment}
+        upcomingAssignments={sortedAssignments}
         isAlreadySent={isAlreadySent}
         messageTemplate={settings.messageTemplate}
         settings={settings}
@@ -548,8 +587,12 @@ function MainApp() {
             houses={houses}
             reports={reports}
             terms={terms}
+            assignments={assignments}
             settings={settings}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
             onRefreshData={refreshAllData}
+            externalModalAction={externalModalAction}
             onOpenSettings={(section) => {
               if (section) setSettingsInitialSection(section);
               setActiveTab('settings');
@@ -570,6 +613,10 @@ function MainApp() {
             onTriggerAlarmTest={() => {
               if (isDutyPending) setAlarmSheetMode('alarm');
             }}
+            onOpenReminderSettings={() => {
+              setSettingsInitialSection('duty');
+              setActiveTab('settings');
+            }}
           />
         )}
 
@@ -578,6 +625,11 @@ function MainApp() {
             settings={settings}
             houses={houses}
             terms={terms}
+            reports={reports}
+            rosters={rosters}
+            assignments={assignments}
+            sendHistory={sendHistory}
+            selectedDate={selectedDate}
             onRefreshData={refreshAllData}
             initialSection={settingsInitialSection}
           />
@@ -585,6 +637,52 @@ function MainApp() {
       </main>
 
       <OfflineIndicator />
+
+      <AIChatController
+        houses={houses}
+        reports={reports}
+        terms={terms}
+        rosters={rosters}
+        assignments={assignments}
+        settings={settings}
+        activeTab={activeTab}
+        selectedDate={selectedDate}
+        featuredAssignment={featuredAssignment}
+        isDutyPending={isDutyPending}
+        onRefreshData={refreshAllData}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+        onOpenSettingsSection={(section) => setSettingsInitialSection(section)}
+        onSelectDate={(date) => setSelectedDate(date)}
+        onOpenHouseModal={(houseId) => {
+          setActiveTab('houseReports');
+          setExternalModalAction({ type: 'house', houseId, nonce: Date.now() });
+        }}
+        onOpenFormLinkModal={() => {
+          setActiveTab('houseReports');
+          setExternalModalAction({ type: 'formLink', nonce: Date.now() });
+        }}
+        onOpenWhatsAppModal={(houseId, date) => {
+          setActiveTab('houseReports');
+          setExternalModalAction({ type: 'whatsapp', houseId, date, nonce: Date.now() });
+        }}
+        onMarkDutyDone={handleMarkFeaturedDone}
+        onUnmarkDutyDone={handleUnmarkFeaturedDone}
+        onTriggerAlarmTest={() => {
+          if (isDutyPending) setAlarmSheetMode('alarm');
+        }}
+        onUpdateSettings={async (nextSettings) => {
+          setSettings(nextSettings);
+          await saveSettings(nextSettings);
+          await refreshAllData();
+        }}
+        onToggleTheme={(targetTheme) => {
+          if (targetTheme === 'dark' || targetTheme === 'light') {
+            setTheme(targetTheme);
+          } else {
+            toggleTheme();
+          }
+        }}
+      />
 
       {reviewData && (
         <ReviewDataModal

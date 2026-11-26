@@ -1,5 +1,6 @@
 import { runGoogleFormsReceiverTests } from './googleFormsReceiver.test.ts';
 import { runTallyWebhookTests } from './tallyWebhook.test.ts';
+import { runAnnouncementAndMidtermTests } from './announcementAndMidterm.test.ts';
 
 async function main() {
   console.log('Running all Xtreme backend test suites...');
@@ -10,7 +11,10 @@ async function main() {
   // 2. Google Forms Attendance Receiver Suite
   await runGoogleFormsReceiverTests();
 
-  // 3. Tally API Polling Legacy Integration Suite
+  // 3. Announcement Formatting & Mid-Term Suite
+  await runAnnouncementAndMidtermTests();
+
+  // 4. Tally API Polling Legacy Integration Suite
   const { execSync } = await import('child_process');
   console.log('Running Tally Integration test suite...');
   execSync('npx tsx tests/tally.test.ts', { stdio: 'inherit' });

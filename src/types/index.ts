@@ -79,12 +79,14 @@ export interface HouseConfig {
   expectedStudentCount: number;
   active: boolean;
   displayOrder: number;
+  updatedAt?: string;
 }
 
 export interface AcademicTerm {
   id: string;
   academicYear: string; // e.g. "2026/2027"
-  termName: string; // e.g. "Term 1"
+  termName: string; // e.g. "Term 1" or "Mid-Term 1"
+  termType?: 'term' | 'midterm';
   openingDate: string; // YYYY-MM-DD
   reportingStartDate: string; // YYYY-MM-DD
   reportingEndDate: string; // YYYY-MM-DD
@@ -148,6 +150,10 @@ export interface AppSettings {
   reminderEnabled: boolean;
   reminderDay: number; // 0 = Sunday, 1 = Monday, etc.
   reminderTime: string; // HH:mm format, e.g. "08:00"
+  soundAlertEnabled?: boolean; // Play audible bell chime during urgent reminders
+  voiceAlertEnabled?: boolean; // Read spoken reminder prompt over speaker
+  autoAnnounceEnabled?: boolean; // Legacy optional flag (manual dispatch preferred)
+  autoCopyOnSchedule?: boolean; // Legacy optional flag
   messageTemplate: string;
   whatsAppBehavior: 'app' | 'web' | 'prompt';
   targetGroupHint?: string;
@@ -178,7 +184,40 @@ export interface AppSettings {
   fcmToken?: string;
 
   theme?: 'dark' | 'light';
+  aiPersona?: AiPersonaPreset;
+  updatedAt: string;
+}
+
+export type AiPersonaPreset = 'concise' | 'supportive' | 'detailed';
+
+export interface AiActionItem {
+  actionType: string;
+  planTitle?: string;
+  actionPayload?: Record<string, any>;
+}
+
+export interface AiChatMessage {
+  id: string;
+  sender: 'user' | 'ai';
+  text: string;
+  timestamp?: string;
+  modelUsed?: string;
+  planTitle?: string;
+  actionType?: string;
+  actionPayload?: any;
+  actions?: AiActionItem[];
+  chartData?: Array<{ label: string; value: number; max: number }>;
+  actionApplied?: boolean;
+  actionStatusText?: string;
+}
+
+export interface AiChatSession {
+  id: string;
+  title: string;
+  messages: AiChatMessage[];
+  createdAt: string;
   updatedAt: string;
 }
 
 export * from './tally.ts';
+

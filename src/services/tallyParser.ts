@@ -1,4 +1,5 @@
 import { HouseConfig, HouseDailyReport, AcademicTerm } from '../types/index.ts';
+import { getLocalTodayIso } from './messageGenerator.ts';
 import {
   TallyQuestion,
   TallySubmission,
@@ -126,7 +127,7 @@ export function normalizeDateString(rawDate: any, fallbackDate?: string): string
         }
       }
     }
-    return new Date().toISOString().split('T')[0];
+    return getLocalTodayIso();
   };
 
   if (!rawDate || rawDate === undefined || rawDate === null) return getFallback();

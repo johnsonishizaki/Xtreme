@@ -155,3 +155,31 @@ html.dark {
   animation: strobe-viewport-frame 0.9s ease-in-out infinite;
 }
 
+/* Fix duplicate native browser calendar & time icons so our Lucide icon is the sole visual icon */
+.date-input-clean::-webkit-calendar-picker-indicator,
+.time-input-clean::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.date-input-clean,
+.time-input-clean {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bell-ring,
+  .animate-urgent-glow,
+  .animate-urgent-bar,
+  .animate-strobe-frame {
+    animation: none !important;
+  }
+}
+

@@ -10,6 +10,8 @@ import {
   Loader2
 } from 'lucide-react';
 import { DutyAssignment, ParsedRosterPayload, Roster } from '../types';
+import { getLocalTodayIso } from '../services/messageGenerator';
+import { DateField } from './DateField';
 
 interface ReviewDataModalProps {
   parsedData: ParsedRosterPayload;
@@ -77,10 +79,10 @@ export const ReviewDataModal: React.FC<ReviewDataModalProps> = ({
   // Add new blank week
   const handleAddWeek = () => {
     const today = new Date();
-    const start = today.toISOString().split('T')[0];
+    const start = getLocalTodayIso(today);
     const endObj = new Date(today);
     endObj.setDate(today.getDate() + 6);
-    const end = endObj.toISOString().split('T')[0];
+    const end = getLocalTodayIso(endObj);
 
     setAssignments(prev => [
       ...prev,
@@ -260,23 +262,25 @@ export const ReviewDataModal: React.FC<ReviewDataModalProps> = ({
                 </div>
 
                 {/* Dates Row */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] font-mono block mb-0.5 text-[var(--text-muted)]">Start Date</label>
-                    <input
-                      type="date"
+                    <DateField
+                      compact
                       value={item.startDate}
-                      onChange={e => handleFieldChange(idx, 'startDate', e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-page)]"
+                      onChange={val => handleFieldChange(idx, 'startDate', val)}
+                      ariaLabel="Week start date"
+                      className="w-full"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-mono block mb-0.5 text-[var(--text-muted)]">End Date</label>
-                    <input
-                      type="date"
+                    <DateField
+                      compact
                       value={item.endDate}
-                      onChange={e => handleFieldChange(idx, 'endDate', e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-page)]"
+                      onChange={val => handleFieldChange(idx, 'endDate', val)}
+                      ariaLabel="Week end date"
+                      className="w-full"
                     />
                   </div>
                 </div>

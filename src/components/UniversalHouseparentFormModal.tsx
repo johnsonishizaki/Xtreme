@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import { HouseConfig, AcademicTerm, HouseDailyReport } from '../types';
 import { saveHouseReport } from '../services/firebase';
-import { copyToClipboard } from '../services/messageGenerator';
+import { copyToClipboard, getLocalTodayIso } from '../services/messageGenerator';
+import { DateField } from './DateField';
 
 interface UniversalHouseparentFormModalProps {
   isOpen: boolean;
@@ -42,7 +43,7 @@ export const UniversalHouseparentFormModal: React.FC<UniversalHouseparentFormMod
     initialHouseId || houses[0]?.id || 'house-1'
   );
   const [reportingDate, setReportingDate] = useState<string>(
-    initialDate || new Date().toISOString().split('T')[0]
+    initialDate || getLocalTodayIso()
   );
   const [reportedCount, setReportedCount] = useState<number>(0);
   const [notReportedDetails, setNotReportedDetails] = useState<string>('');
@@ -292,12 +293,12 @@ export const UniversalHouseparentFormModal: React.FC<UniversalHouseparentFormMod
 
             {/* Date */}
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-[var(--text-page)]">Date</label>
-              <input
-                type="date"
+              <label className="text-xs font-semibold text-[var(--text-page)] block">Date</label>
+              <DateField
                 value={reportingDate}
-                onChange={e => setReportingDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-xs text-[var(--text-page)] focus:border-emerald-500 outline-none cursor-pointer"
+                onChange={setReportingDate}
+                ariaLabel="Report date"
+                className="w-full"
               />
             </div>
 

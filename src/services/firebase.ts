@@ -23,7 +23,8 @@ import {
   HouseConfig,
   AcademicTerm,
   HouseDailyReport,
-  DailyCollation
+  DailyCollation,
+  AiChatSession
 } from '../types';
 import {
   DEFAULT_HOUSES,
@@ -33,7 +34,7 @@ import {
   SAMPLE_ASSIGNMENTS
 } from './sampleData';
 
-import { DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE } from '../constants/template.ts';
+import { DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATES } from '../constants/template.ts';
 export { DEFAULT_TEMPLATE };
 
 
@@ -41,6 +42,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reminderEnabled: true,
   reminderDay: 0, // Sunday
   reminderTime: '08:00',
+  soundAlertEnabled: true,
+  voiceAlertEnabled: true,
+  autoAnnounceEnabled: false,
+  autoCopyOnSchedule: false,
   messageTemplate: DEFAULT_TEMPLATE,
   whatsAppBehavior: 'app',
   targetGroupHint: 'Teachers Staff Group',
@@ -48,6 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   warningOutstandingThreshold: 1,
   criticalOutstandingRateThreshold: 10,
   theme: 'dark',
+  aiPersona: 'concise',
   updatedAt: new Date().toISOString()
 };
 
@@ -69,7 +75,8 @@ export const LOCAL_STORAGE_KEYS = {
   HISTORY: 'xtreme_duty_history',
   HOUSES: 'xtreme_houses',
   TERMS: 'xtreme_terms',
-  HOUSE_REPORTS: 'xtreme_house_reports'
+  HOUSE_REPORTS: 'xtreme_house_reports',
+  AI_CHATS: 'xtreme_ai_chats'
 };
 
 // ==========================================
@@ -82,9 +89,20 @@ export function getCachedSettings(): AppSettings {
     const cached = localStorage.getItem(LOCAL_STORAGE_KEYS.SETTINGS);
     if (cached) {
       const parsed = JSON.parse(cached) as AppSettings;
-      if (parsed.messageTemplate === LEGACY_DEFAULT_TEMPLATE) {
+      if (
+        !parsed.messageTemplate ||
+        PREVIOUS_DEFAULT_TEMPLATES.includes(parsed.messageTemplate)
+      ) {
         parsed.messageTemplate = DEFAULT_TEMPLATE;
       }
+      if (parsed.soundAlertEnabled === undefined) {
+        parsed.soundAlertEnabled = true;
+      }
+      if (parsed.voiceAlertEnabled === undefined) {
+        parsed.voiceAlertEnabled = true;
+      }
+      parsed.autoAnnounceEnabled = false;
+      parsed.autoCopyOnSchedule = false;
       return parsed;
     }
   } catch {}
@@ -140,8 +158,8 @@ export function getCachedHouses(): HouseConfig[] {
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length === 8) {
-        const validNames = new Set(DEFAULT_HOUSES.map(h => h.name));
-        if (parsed.every((h: HouseConfig) => validNames.has(h.name))) {
+        const validIds = new Set(DEFAULT_HOUSES.map(h => h.id));
+        if (parsed.every((h: HouseConfig) => h?.id && validIds.has(h.id))) {
           return parsed;
         }
       }
@@ -170,7 +188,7 @@ export function getCachedHouseReports(): HouseDailyReport[] {
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.filter((r: HouseDailyReport) => !r.id.includes('demo') && !r.id.includes('sample') && r.reportingDate !== '2026-10-07' && r.reportingDate !== '2026-10-08');
+        return parsed.filter((r: HouseDailyReport) => !r.id.includes('demo') && !r.id.includes('sample'));
       }
     }
   } catch {}
@@ -212,9 +230,20 @@ export async function getSettings(): Promise<AppSettings> {
     const snap = await withTimeout(getDoc(docRef), 2500);
     if (snap.exists()) {
       const data = snap.data() as AppSettings;
-      if (data.messageTemplate === LEGACY_DEFAULT_TEMPLATE) {
+      if (
+        !data.messageTemplate ||
+        PREVIOUS_DEFAULT_TEMPLATES.includes(data.messageTemplate)
+      ) {
         data.messageTemplate = DEFAULT_TEMPLATE;
       }
+      if (data.soundAlertEnabled === undefined) {
+        data.soundAlertEnabled = true;
+      }
+      if (data.voiceAlertEnabled === undefined) {
+        data.voiceAlertEnabled = true;
+      }
+      data.autoAnnounceEnabled = false;
+      data.autoCopyOnSchedule = false;
       localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(data));
       return data;
     }
@@ -248,8 +277,8 @@ export async function getHouses(): Promise<HouseConfig[]> {
     const houses: HouseConfig[] = [];
     snap.forEach(d => houses.push(d.data() as HouseConfig));
     if (houses.length > 0) {
-      const validNames = new Set(DEFAULT_HOUSES.map(h => h.name));
-      const allValid = houses.length === 8 && houses.every(h => validNames.has(h.name));
+      const validIds = new Set(DEFAULT_HOUSES.map(h => h.id));
+      const allValid = houses.length === 8 && houses.every(h => h?.id && validIds.has(h.id));
       if (!allValid) {
         await saveHouses(DEFAULT_HOUSES);
         return DEFAULT_HOUSES;
@@ -312,12 +341,12 @@ export async function getTerms(): Promise<AcademicTerm[]> {
     const terms: AcademicTerm[] = [];
     snap.forEach(d => {
       const t = d.data() as AcademicTerm;
-      terms.push({ ...t, status: 'open' });
+      terms.push({ ...t, status: t.status || 'open' });
     });
     localStorage.setItem(LOCAL_STORAGE_KEYS.TERMS, JSON.stringify(terms));
     return terms;
   } catch (err) {
-    return getCachedTerms().map(t => ({ ...t, status: 'open' }));
+    return getCachedTerms().map(t => ({ ...t, status: t.status || 'open' }));
   }
 }
 
@@ -401,7 +430,7 @@ export async function getHouseReports(): Promise<HouseDailyReport[]> {
     const reports: HouseDailyReport[] = [];
     snap.forEach(d => {
       const rep = d.data() as HouseDailyReport;
-      if (rep && rep.id && !rep.id.includes('sample') && !rep.id.includes('demo') && rep.reportingDate !== '2026-10-07' && rep.reportingDate !== '2026-10-08') {
+      if (rep && rep.id && !rep.id.includes('sample') && !rep.id.includes('demo')) {
         reports.push(rep);
       }
     });
@@ -465,11 +494,35 @@ export async function saveHouseReport(report: HouseDailyReport): Promise<void> {
   const updatedList = [cleanReport, ...filtered];
   localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSE_REPORTS, JSON.stringify(updatedList));
 
-  // Sync to Firestore
+  // Sync via same-origin server endpoint + direct Firestore SDK
+  try {
+    await fetch('/api/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cleanDoc(cleanReport))
+    });
+  } catch {}
+
   try {
     await setDoc(doc(db, 'houseReports', cleanReport.id), cleanDoc(cleanReport), { merge: true });
   } catch (err) {
     console.warn('Firestore saveHouseReport fallback to local storage:', err);
+  }
+}
+
+export async function deleteHouseReport(reportId: string): Promise<void> {
+  const cached = getCachedHouseReports();
+  const remaining = cached.filter(r => r.id !== reportId);
+  localStorage.setItem(LOCAL_STORAGE_KEYS.HOUSE_REPORTS, JSON.stringify(remaining));
+
+  try {
+    await fetch(`/api/reports/${encodeURIComponent(reportId)}`, { method: 'DELETE' });
+  } catch {}
+
+  try {
+    await deleteDoc(doc(db, 'houseReports', reportId));
+  } catch (err) {
+    console.warn('Firestore deleteHouseReport fallback:', err);
   }
 }
 
@@ -680,6 +733,14 @@ export async function updateDutyAssignment(assignment: DutyAssignment): Promise<
   localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(updated));
 
   try {
+    await fetch('/api/duty/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cleanDoc(assignment))
+    });
+  } catch {}
+
+  try {
     await setDoc(doc(db, 'dutyAssignments', assignment.id), cleanDoc(assignment), { merge: true });
   } catch (err) {
     console.warn('Firestore updateDutyAssignment fallback:', err);
@@ -715,6 +776,30 @@ export async function recordSendHistory(item: SendHistory): Promise<void> {
     await setDoc(doc(db, 'sendHistory', item.id), cleanDoc(item));
   } catch (err) {
     console.warn('Firestore recordSendHistory fallback:', err);
+  }
+}
+
+export async function unmarkDutySent(assignmentId: string): Promise<void> {
+  const cached = await getSendHistory();
+  const toDelete = cached.filter(h => h.assignmentId === assignmentId && h.status === 'sent_confirmed');
+  const remaining = cached.filter(h => !(h.assignmentId === assignmentId && h.status === 'sent_confirmed'));
+  localStorage.setItem(LOCAL_STORAGE_KEYS.HISTORY, JSON.stringify(remaining));
+
+  try {
+    const batch = writeBatch(db);
+    for (const item of toDelete) {
+      batch.delete(doc(db, 'sendHistory', item.id));
+    }
+    const snap = await getDocs(collection(db, 'sendHistory'));
+    snap.forEach(d => {
+      const data = d.data() as SendHistory;
+      if (data.assignmentId === assignmentId && data.status === 'sent_confirmed') {
+        batch.delete(d.ref);
+      }
+    });
+    await batch.commit();
+  } catch (err) {
+    console.warn('Firestore unmarkDutySent fallback:', err);
   }
 }
 
@@ -759,3 +844,106 @@ export async function clearAllDemoData(): Promise<void> {
     console.warn('Purge demo documents:', err);
   }
 }
+
+// ==========================================
+// 8. PERSISTENT AI CHAT SESSIONS
+// ==========================================
+
+export function getCachedAiChats(): AiChatSession[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEYS.AI_CHATS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.sort((a: AiChatSession, b: AiChatSession) =>
+          (b.updatedAt || '').localeCompare(a.updatedAt || '')
+        );
+      }
+    }
+  } catch {}
+  return [];
+}
+
+export async function getAiChats(): Promise<AiChatSession[]> {
+  try {
+    const res = await fetch('/api/ai-chats');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.chats)) {
+        const sorted = [...data.chats].sort((a: AiChatSession, b: AiChatSession) =>
+          (b.updatedAt || '').localeCompare(a.updatedAt || '')
+        );
+        if (sorted.length > 0) {
+          localStorage.setItem(LOCAL_STORAGE_KEYS.AI_CHATS, JSON.stringify(sorted));
+          return sorted;
+        }
+      }
+    }
+  } catch {}
+
+  try {
+    const colRef = collection(db, 'aiChats');
+    const q = query(colRef, orderBy('updatedAt', 'desc'));
+    const snap = await withTimeout(getDocs(q), 2500);
+    const chats: AiChatSession[] = [];
+    snap.forEach(d => {
+      const chat = d.data() as AiChatSession;
+      if (chat && chat.id && Array.isArray(chat.messages)) {
+        chats.push(chat);
+      }
+    });
+    if (chats.length > 0) {
+      localStorage.setItem(LOCAL_STORAGE_KEYS.AI_CHATS, JSON.stringify(chats));
+      return chats;
+    }
+  } catch {}
+
+  return getCachedAiChats();
+}
+
+export async function saveAiChat(session: AiChatSession): Promise<void> {
+  const existing = getCachedAiChats();
+  const filtered = existing.filter(c => c.id !== session.id);
+  const nextList = [session, ...filtered]
+    .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+    .slice(0, 25);
+
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.AI_CHATS, JSON.stringify(nextList));
+  } catch {}
+
+  const sanitized = cleanDoc(session);
+  try {
+    await fetch('/api/ai-chats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sanitized)
+    });
+  } catch {}
+
+  try {
+    await setDoc(doc(db, 'aiChats', session.id), sanitized, { merge: true });
+  } catch (err) {
+    console.warn('Firestore saveAiChat fallback:', err);
+  }
+}
+
+export async function deleteAiChat(chatId: string): Promise<void> {
+  const existing = getCachedAiChats();
+  const remaining = existing.filter(c => c.id !== chatId);
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.AI_CHATS, JSON.stringify(remaining));
+  } catch {}
+
+  try {
+    await fetch(`/api/ai-chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' });
+  } catch {}
+
+  try {
+    await deleteDoc(doc(db, 'aiChats', chatId));
+  } catch (err) {
+    console.warn('Firestore deleteAiChat fallback:', err);
+  }
+}
+

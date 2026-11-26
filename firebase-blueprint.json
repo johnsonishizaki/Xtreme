@@ -3,12 +3,57 @@
     "Settings": {
       "collection": "settings",
       "fields": {
-        "reminderEnabled": { "type": "boolean", "description": "Whether weekly Sunday reminders are enabled" },
-        "reminderDay": { "type": "number", "description": "Day of week for reminder (0 = Sunday)" },
+        "reminderEnabled": { "type": "boolean", "description": "Whether scheduled duty reminders are enabled" },
+        "reminderDay": { "type": "number", "description": "Day of week for reminder (0 = Sunday .. 6 = Saturday)" },
         "reminderTime": { "type": "string", "description": "Time of day (e.g. 08:00)" },
+        "autoAnnounceEnabled": { "type": "boolean", "description": "Whether automated weekly announcement staging & prompt is enabled" },
+        "autoCopyOnSchedule": { "type": "boolean", "description": "Whether scheduled announcements auto-copy to clipboard" },
         "messageTemplate": { "type": "string", "description": "WhatsApp announcement template with variables" },
         "whatsAppBehavior": { "type": "string", "description": "Deep link action (app, web, universal)" },
+        "aiPersona": { "type": "string", "description": "Selected AI persona preset: concise, supportive, detailed" },
+        "activeTermId": { "type": "string", "description": "Active academic term or mid-term ID" },
         "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      }
+    },
+    "AcademicTerm": {
+      "collection": "terms",
+      "fields": {
+        "id": { "type": "string", "description": "Unique term or mid-term ID" },
+        "academicYear": { "type": "string", "description": "Academic year e.g. 2026/2027" },
+        "termName": { "type": "string", "description": "Term or Mid-Term label (e.g. Term 1, Mid-Term 1)" },
+        "termType": { "type": "string", "description": "Period type: term or midterm" },
+        "openingDate": { "type": "string", "description": "Opening/return date YYYY-MM-DD" },
+        "reportingStartDate": { "type": "string", "description": "Reporting window start YYYY-MM-DD" },
+        "reportingEndDate": { "type": "string", "description": "Reporting window end YYYY-MM-DD" },
+        "status": { "type": "string", "description": "open or closed" }
+      }
+    },
+    "House": {
+      "collection": "houses",
+      "fields": {
+        "id": { "type": "string", "description": "Unique house identifier (house-1..house-8)" },
+        "name": { "type": "string", "description": "House display name" },
+        "category": { "type": "string", "description": "Boys or Girls" },
+        "assignedHouseparent": { "type": "string", "description": "Houseparent name" },
+        "houseparentPhone": { "type": "string", "description": "Optional WhatsApp contact number" },
+        "expectedStudentCount": { "type": "number", "description": "Student quota" },
+        "active": { "type": "boolean", "description": "Whether house is active" },
+        "displayOrder": { "type": "number", "description": "Sort order" }
+      }
+    },
+    "HouseDailyReport": {
+      "collection": "houseReports",
+      "fields": {
+        "id": { "type": "string", "description": "YYYY-MM-DD_houseId" },
+        "termId": { "type": "string", "description": "Academic term ID" },
+        "reportingDate": { "type": "string", "description": "Date YYYY-MM-DD" },
+        "houseId": { "type": "string", "description": "House ID" },
+        "houseName": { "type": "string", "description": "House display name" },
+        "expectedCount": { "type": "number", "description": "House quota" },
+        "reportedCount": { "type": "number", "description": "Students present count" },
+        "notReportedCount": { "type": "number", "description": "Pending student count" },
+        "notReportedDetails": { "type": "string", "description": "Follow-up notes" },
+        "status": { "type": "string", "description": "Report status" }
       }
     },
     "Roster": {
@@ -59,6 +104,16 @@
         "newArrivalsCount": { "type": "number", "description": "New arrivals count" },
         "receivedAt": { "type": "string", "description": "ISO timestamp received" },
         "status": { "type": "string", "description": "imported or rejected" }
+      }
+    },
+    "AiChatSession": {
+      "collection": "aiChats",
+      "fields": {
+        "id": { "type": "string", "description": "Unique chat session ID" },
+        "title": { "type": "string", "description": "Conversation title" },
+        "messages": { "type": "array", "description": "Ordered user and AI turns with charts and actions" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
       }
     }
   }

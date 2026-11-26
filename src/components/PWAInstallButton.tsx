@@ -51,15 +51,17 @@ export const PWAInstallButton: React.FC = () => {
                 </button>
               </div>
               <div className="space-y-2.5 text-xs text-[var(--text-muted)] leading-relaxed">
-                <div className="p-3 rounded-xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)] flex items-center gap-2.5">
-                  <Share className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span>1. Tap the <strong>Share</strong> icon in your Safari toolbar.</span>
+                <div className="p-3 rounded-xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)] flex items-start gap-2.5">
+                  <Share className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <span>
+                    <strong className="text-[var(--text-page)]">1. Open Share Menu:</strong> Tap the <strong className="text-[var(--text-page)]">Share</strong> icon (or <strong className="text-[var(--text-page)]">••• → Share</strong> on iOS 26 Safari).
+                  </span>
                 </div>
                 <div className="p-3 rounded-xl bg-[var(--card-bg-elevated)] border border-[var(--card-border)]">
-                  2. Scroll down and tap <strong>Add to Home Screen</strong>.
+                  <strong className="text-[var(--text-page)]">2. Add to Home Screen:</strong> Tap <strong>View More → Add to Home Screen</strong>, ensure <strong>Open as Web App</strong> is ON, then tap <strong>Add</strong>.
                 </div>
                 <p className="text-[11px] text-[var(--text-subtle)]">
-                  Once installed on your Home Screen, you get instant full-screen launch and iOS push notifications.
+                  Launch Xtreme from your iPhone Home Screen icon to unlock Lock-Screen Push notifications and app badge counts.
                 </p>
               </div>
               <button

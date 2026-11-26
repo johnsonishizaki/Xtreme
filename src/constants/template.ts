@@ -10,7 +10,7 @@ Kindly ensure you are present and punctual for all assemblies, breaks, and dismi
 
 Thank you for your dedication!`;
 
-export const DEFAULT_TEMPLATE = `📢 WEEKLY TEACHER DUTY ANNOUNCEMENT
+export const V2_DEFAULT_TEMPLATE = `📢 WEEKLY TEACHER DUTY ANNOUNCEMENT
 🗓️ {WEEK}
 📅 Period: {START_DATE} – {END_DATE}
 
@@ -23,3 +23,40 @@ Kindly ensure full supervision and punctuality for assembly, break periods, dini
 
 Thank you for your dedication!
 — Senior Houseparent, OLAG SHS`;
+
+export const PREVIOUS_DEFAULT_TEMPLATES = [
+  LEGACY_DEFAULT_TEMPLATE,
+  V2_DEFAULT_TEMPLATE
+];
+
+export const DEFAULT_TEMPLATE = `ATTENTION! ATTENTION! ATTENTION!
+Masters/Mistresses On Duty For {WEEK}
+
+(From {START_DATE} To {END_DATE})
+
+{TEACHERS}
+
+Kindly take note: *Tuesday is GENERAL CLEANING.* FORM MASTERS, MASTERS & MISTRESSES ON DUTY SHOULD KINDLY TAKE NOTE.
+
+🙏🏾Thank you
+
+
+
+DUTIES/RESPONSIBILITIES:
+- *Supervision of work on the compound*
+- *Ensuring students discipline*
+- *Supervision of dining Session*
+- *Identifying and punishing latecomers*
+- *Making sure students are in their classroom during classes time*
+- *making sure students (patients) take their drugs from the sick bay*
+•*Writing names of offenders in the punishment book for punishment on Tuesday*
+- *Writing Names of students who refuse to eat and those who don’t use the appropriate set of cutlery for punishment*
+- *Writing reports on activities during period of duty.*
+
+
+
+N/B
+- Team Leader is to contact Senior/assistant senior house tutor for report form.
+- Team Leader is to ensure that names of teachers who perform the duty are written on the report form.
+- Your commitment and cooperation will be highly anticipated.
+•Failure to attend to your duties requires sanction from management.`;

@@ -42,6 +42,13 @@ export const HouseDetailModal: React.FC<HouseDetailModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    setReportedCount(report ? report.reportedCount : 0);
+    setExpectedCount(report ? report.expectedCount : house.expectedStudentCount);
+    setFollowUpDetails(report?.notReportedDetails || '');
+    setNotes(report?.notes || '');
+  }, [house.id, house.expectedStudentCount, report?.id, report?.updatedAt]);
+
   const notReportedCalc = Math.max(0, expectedCount - reportedCount);
   const percentage = expectedCount > 0 ? Number(((reportedCount / expectedCount) * 100).toFixed(1)) : 0;
 

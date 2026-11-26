@@ -105,6 +105,7 @@ export const DEFAULT_TERM: AcademicTerm = {
   id: 'term-1-2026',
   academicYear: '2026/2027',
   termName: 'Term 1',
+  termType: 'term',
   openingDate: '2026-10-07',
   reportingStartDate: '2026-10-07',
   reportingEndDate: '2026-10-12',
